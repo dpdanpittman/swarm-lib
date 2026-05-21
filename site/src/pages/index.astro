@@ -8,14 +8,13 @@ import '../styles/global.css';
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>swarm-lib — filesystem-as-orchestrator for agentic workflows</title>
   <meta name="description" content="A small Python + Bash library that turns agentic workflows into queue-claimable tasks with durable state. The Yield Rule, atomic-rename queueing, status.json checkpointing." />
-  <link rel="canonical" href="https://mabus.ai/swarm/" />
 </head>
 <body class="bg-bg text-text">
   <main class="max-w-4xl mx-auto px-6 py-16">
 
     <!-- Hero -->
     <section class="mb-16">
-      <p class="text-sm text-muted mb-3 font-mono">v0.1 · in design</p>
+      <p class="text-sm text-accent-green mb-3 font-mono">v0.1 · substrate live · alpha</p>
       <h1 class="text-5xl font-bold mb-4 leading-tight">swarm-lib</h1>
       <p class="text-xl text-muted mb-3 leading-relaxed">
         Filesystem-as-orchestrator for agentic workflows.
@@ -24,9 +23,37 @@ import '../styles/global.css';
         Three primitives — the <span class="text-warm">Yield Rule</span>, atomic-rename queueing, and <code class="bg-code-bg border border-code-border px-2 py-0.5 rounded text-accent text-sm">status.json</code> checkpointing — that turn LLM-driven agents into interchangeable workers backed by durable state. No broker. No daemon. No external database. Just POSIX and JSON.
       </p>
       <div class="flex flex-wrap gap-3">
-        <a href="#design" class="bg-accent text-bg px-5 py-2.5 rounded font-semibold hover:opacity-90 transition">Read the design</a>
-        <a href="https://github.com/dpdanpittman/swarm-lib" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">GitHub</a>
+        <a href="https://github.com/dpdanpittman/swarm-lib" class="bg-accent text-bg px-5 py-2.5 rounded font-semibold hover:opacity-90 transition">GitHub</a>
+        <a href="https://github.com/dpdanpittman/swarm-lib/blob/main/DESIGN.md" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">Design spec</a>
         <a href="#quickstart" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">Quickstart</a>
+      </div>
+    </section>
+
+    <!-- What works today -->
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-2 text-accent">What works today</h2>
+      <p class="text-muted mb-6 max-w-2xl">v0.1 substrate is complete and validated end-to-end. The Python lib + bash worker loop are both live; full pipeline (enqueue → claim → handler → done + status update) passes integration smoke tests.</p>
+      <div class="grid md:grid-cols-2 gap-3 text-sm">
+        <div class="bg-panel border-l-2 border-accent-green p-4 rounded-r">
+          <p class="font-mono text-xs text-muted mb-1">swarm_lib.claims</p>
+          <p class="text-text"><code class="text-accent text-xs">enqueue</code> · <code class="text-accent text-xs">try_claim</code> · <code class="text-accent text-xs">complete</code></p>
+          <p class="text-muted text-xs mt-1">POSIX atomic-rename queue primitives</p>
+        </div>
+        <div class="bg-panel border-l-2 border-accent-green p-4 rounded-r">
+          <p class="font-mono text-xs text-muted mb-1">swarm_lib.status</p>
+          <p class="text-text"><code class="text-accent text-xs">initialize</code> · <code class="text-accent text-xs">read</code> · <code class="text-accent text-xs">write</code> · <code class="text-accent text-xs">append_completed</code></p>
+          <p class="text-muted text-xs mt-1">status.json checkpoint state</p>
+        </div>
+        <div class="bg-panel border-l-2 border-accent-green p-4 rounded-r">
+          <p class="font-mono text-xs text-muted mb-1">swarm-cli</p>
+          <p class="text-text">All primitives over subprocess for non-Python consumers</p>
+          <p class="text-muted text-xs mt-1">jq-friendly single-line JSON</p>
+        </div>
+        <div class="bg-panel border-l-2 border-accent-green p-4 rounded-r">
+          <p class="font-mono text-xs text-muted mb-1">worker_loop.sh</p>
+          <p class="text-text">Generic consumer loop, handler-agnostic</p>
+          <p class="text-muted text-xs mt-1">Bash, drives the whole pipeline</p>
+        </div>
       </div>
     </section>
 
@@ -83,28 +110,48 @@ import '../styles/global.css';
     <!-- Quickstart -->
     <section id="quickstart" class="mb-16">
       <h2 class="text-2xl font-bold mb-4 text-accent">Quickstart</h2>
-      <p class="text-muted mb-4 text-sm">v0.1 is in design. Once shipped, the surface looks like:</p>
-      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># Producer</span>
-<span class="text-accent">from</span> swarm_lib <span class="text-accent">import</span> claims, status
 
+      <h3 class="text-lg font-semibold mb-2 text-warm">Install</h3>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-6"><code>git clone https://github.com/dpdanpittman/swarm-lib
+cd swarm-lib
+pip install -e .
+<span class="text-muted"># 'swarm-cli' is now on your PATH</span></code></pre>
+
+      <h3 class="text-lg font-semibold mb-2 text-warm">From Python</h3>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-6"><code><span class="text-accent">from</span> swarm_lib <span class="text-accent">import</span> claims, status
+
+run_dir = <span class="text-warm">"~/swarm-runs/demo-1"</span>
+
+<span class="text-muted"># Producer: write a task</span>
+status.initialize(run_dir, run_id=<span class="text-warm">"demo-1"</span>)
 claims.enqueue(
-    run_dir=<span class="text-warm">"~/src/tribunal/run/r42x"</span>,
-    task_id=<span class="text-warm">"t.r42x.plan"</span>,
+    run_dir,
+    task_id=<span class="text-warm">"t.1"</span>,
     task_type=<span class="text-warm">"plan"</span>,
-    payload={...},
+    payload={<span class="text-warm">"hello"</span>: <span class="text-warm">"world"</span>},
 )
 
-<span class="text-muted"># Consumer</span>
-task = claims.try_claim(run_dir, worker_id=<span class="text-warm">"mabus-tribunal-1"</span>)
+<span class="text-muted"># Consumer: claim and finish it</span>
+task = claims.try_claim(run_dir, worker_id=<span class="text-warm">"w.demo"</span>)
 <span class="text-accent">if</span> task:
-    do_work(task)
-    claims.complete(task, success=<span class="text-warm">True</span>, artifact_path=<span class="text-warm">"..."</span>)
-
-<span class="text-muted"># Durable state</span>
-status.write(run_dir, summary=<span class="text-warm">"plan done"</span>,
-             next_step=<span class="text-warm">"invoke implement"</span>,
-             next_task_id=<span class="text-warm">"t.r42x.implement"</span>)
+    <span class="text-muted"># ...do work, write artifacts...</span>
+    claims.complete(task, success=<span class="text-accent-green">True</span>)
 </code></pre>
+
+      <h3 class="text-lg font-semibold mb-2 text-warm">From bash (via <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">worker_loop.sh</code>)</h3>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># Write a handler — receives task JSON on stdin, writes to $SWARM_ARTIFACT_PATH</span>
+cat &gt; handler.sh &lt;&lt;<span class="text-warm">'EOF'</span>
+#!/usr/bin/env bash
+echo <span class="text-warm">"handled $SWARM_TASK_ID by $SWARM_WORKER_ID"</span> &gt; <span class="text-warm">"$SWARM_ARTIFACT_PATH"</span>
+EOF
+chmod +x handler.sh
+
+<span class="text-muted"># Run a worker — claims, invokes handler, marks done</span>
+swarm_lib/worker_loop.sh \
+  --run-dir ~/swarm-runs/demo-1 \
+  --worker-id w.demo \
+  --handler ./handler.sh \
+  --max-iterations 1</code></pre>
     </section>
 
     <!-- For whom -->
@@ -129,22 +176,12 @@ status.write(run_dir, summary=<span class="text-warm">"plan done"</span>,
       </div>
     </section>
 
-    <!-- Design -->
-    <section id="design" class="mb-16">
-      <h2 class="text-2xl font-bold mb-4 text-accent">Design</h2>
-      <p class="text-muted mb-4">v0.1 spec covers the substrate primitives, the <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json</code> schema, the claim protocol, and the Tribunal port plan that validates it.</p>
-      <div class="flex flex-wrap gap-3">
-        <a href="https://github.com/dpdanpittman/swarm-lib/blob/main/DESIGN.md" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">DESIGN.md</a>
-        <a href="https://github.com/dpdanpittman/swarm-lib/blob/main/DESIGN.html" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">DESIGN.html</a>
-      </div>
-    </section>
-
     <!-- Roadmap -->
     <section class="mb-16">
       <h2 class="text-2xl font-bold mb-4 text-accent">Roadmap</h2>
       <div class="space-y-3 text-muted">
-        <div class="flex gap-4 items-baseline"><span class="text-warm font-mono w-16 shrink-0">v0.1</span><span>Substrate primitives + Tribunal port (in design)</span></div>
-        <div class="flex gap-4 items-baseline"><span class="text-muted font-mono w-16 shrink-0">v0.2</span><span>HMD triage layer (cheap-model classify → expensive-model escalation) + orphan cleanup daemon</span></div>
+        <div class="flex gap-4 items-baseline"><span class="text-accent-green font-mono w-16 shrink-0">v0.1</span><span><span class="text-accent-green">✓</span> Substrate primitives live: claims · status · cli · worker_loop. Next: Tribunal port as first real consumer.</span></div>
+        <div class="flex gap-4 items-baseline"><span class="text-warm font-mono w-16 shrink-0">v0.2</span><span>HMD triage layer (cheap-model classify → expensive-model escalation) + orphan cleanup daemon</span></div>
         <div class="flex gap-4 items-baseline"><span class="text-muted font-mono w-16 shrink-0">v0.3</span><span>Multi-host coordination (shared queue) + n8n federation + Kanban UI</span></div>
       </div>
     </section>
