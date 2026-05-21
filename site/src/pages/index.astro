@@ -1,0 +1,160 @@
+---
+import '../styles/global.css';
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>swarm-lib — filesystem-as-orchestrator for agentic workflows</title>
+  <meta name="description" content="A small Python + Bash library that turns agentic workflows into queue-claimable tasks with durable state. The Yield Rule, atomic-rename queueing, status.json checkpointing." />
+  <link rel="canonical" href="https://mabus.ai/swarm/" />
+</head>
+<body class="bg-bg text-text">
+  <main class="max-w-4xl mx-auto px-6 py-16">
+
+    <!-- Hero -->
+    <section class="mb-16">
+      <p class="text-sm text-muted mb-3 font-mono">v0.1 · in design</p>
+      <h1 class="text-5xl font-bold mb-4 leading-tight">swarm-lib</h1>
+      <p class="text-xl text-muted mb-3 leading-relaxed">
+        Filesystem-as-orchestrator for agentic workflows.
+      </p>
+      <p class="text-base text-muted mb-8 leading-relaxed max-w-2xl">
+        Three primitives — the <span class="text-warm">Yield Rule</span>, atomic-rename queueing, and <code class="bg-code-bg border border-code-border px-2 py-0.5 rounded text-accent text-sm">status.json</code> checkpointing — that turn LLM-driven agents into interchangeable workers backed by durable state. No broker. No daemon. No external database. Just POSIX and JSON.
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <a href="#design" class="bg-accent text-bg px-5 py-2.5 rounded font-semibold hover:opacity-90 transition">Read the design</a>
+        <a href="https://github.com/dpdanpittman/swarm-lib" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">GitHub</a>
+        <a href="#quickstart" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">Quickstart</a>
+      </div>
+    </section>
+
+    <!-- Why -->
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-2 text-accent">Why this exists</h2>
+      <p class="text-muted mb-6 max-w-2xl">Agentic workflows today have three structural problems. swarm-lib gives you three primitives to solve them.</p>
+      <div class="grid md:grid-cols-3 gap-4">
+        <div class="bg-panel border-l-2 border-warm p-5 rounded-r">
+          <h3 class="font-semibold mb-2 text-text">Context starvation</h3>
+          <p class="text-sm text-muted leading-relaxed">One long conversation accumulates context, hits compaction, mid-flight work dies. The whole chain depends on a single conversation surviving.</p>
+        </div>
+        <div class="bg-panel border-l-2 border-warm p-5 rounded-r">
+          <h3 class="font-semibold mb-2 text-text">Sync tool-call blocking</h3>
+          <p class="text-sm text-muted leading-relaxed">A planner agent holds an expensive context window open while a subprocess churns for 30 minutes. Tokens burn while the model sits idle waiting for I/O.</p>
+        </div>
+        <div class="bg-panel border-l-2 border-warm p-5 rounded-r">
+          <h3 class="font-semibold mb-2 text-text">Chat-history-as-state</h3>
+          <p class="text-sm text-muted leading-relaxed">When the conversation dies, the work dies. There's no durable source of truth for "where am I in the work" outside the volatile chat window.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Three primitives -->
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-6 text-accent">The three primitives</h2>
+      <div class="space-y-6">
+        <div class="bg-panel rounded p-6">
+          <p class="text-sm text-muted font-mono mb-1">1 / atomic queueing</p>
+          <h3 class="text-xl font-semibold mb-2 text-warm">Atomic-rename task queueing</h3>
+          <p class="text-muted leading-relaxed">
+            Producers stage tasks under <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">pending/</code>.
+            Consumers race for them via <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">os.replace(pending/&lt;id&gt;.json, claimed/&lt;worker_id&gt;/&lt;id&gt;.json)</code>.
+            POSIX guarantees the rename is atomic on the same filesystem — two consumers racing for the same task, exactly one wins, no locks needed. Maildir physics, applied to agent work.
+          </p>
+        </div>
+        <div class="bg-panel rounded p-6">
+          <p class="text-sm text-muted font-mono mb-1">2 / durable handoff</p>
+          <h3 class="text-xl font-semibold mb-2 text-warm"><code class="bg-code-bg border border-code-border px-2 py-1 rounded text-warm">status.json</code> checkpointing</h3>
+          <p class="text-muted leading-relaxed">
+            Every workflow keeps its state in a single JSON file. Any agent — a fresh Claude Code session, a local ollama-backed model, even a shell script — picks up where the last one stopped by reading this file. Compactions, crashes, rate limits, multi-day pauses all become indistinguishable from a clean restart. Chat history is volatile; the file is the contract.
+          </p>
+        </div>
+        <div class="bg-panel rounded p-6">
+          <p class="text-sm text-muted font-mono mb-1">3 / generic worker</p>
+          <h3 class="text-xl font-semibold mb-2 text-warm">Generic <code class="bg-code-bg border border-code-border px-2 py-1 rounded text-warm">worker_loop.sh</code></h3>
+          <p class="text-muted leading-relaxed">
+            Polls the queue, claims atomically, invokes a handler with task JSON on stdin, moves the result to <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">done/</code> or <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">failed/</code>. Workers are interchangeable: any process that reads a JSON task is a participant. Claude Code, ollama agents, n8n flows, shell scripts — same substrate.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quickstart -->
+    <section id="quickstart" class="mb-16">
+      <h2 class="text-2xl font-bold mb-4 text-accent">Quickstart</h2>
+      <p class="text-muted mb-4 text-sm">v0.1 is in design. Once shipped, the surface looks like:</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># Producer</span>
+<span class="text-accent">from</span> swarm_lib <span class="text-accent">import</span> claims, status
+
+claims.enqueue(
+    run_dir=<span class="text-warm">"~/src/tribunal/run/r42x"</span>,
+    task_id=<span class="text-warm">"t.r42x.plan"</span>,
+    task_type=<span class="text-warm">"plan"</span>,
+    payload={...},
+)
+
+<span class="text-muted"># Consumer</span>
+task = claims.try_claim(run_dir, worker_id=<span class="text-warm">"mabus-tribunal-1"</span>)
+<span class="text-accent">if</span> task:
+    do_work(task)
+    claims.complete(task, success=<span class="text-warm">True</span>, artifact_path=<span class="text-warm">"..."</span>)
+
+<span class="text-muted"># Durable state</span>
+status.write(run_dir, summary=<span class="text-warm">"plan done"</span>,
+             next_step=<span class="text-warm">"invoke implement"</span>,
+             next_task_id=<span class="text-warm">"t.r42x.implement"</span>)
+</code></pre>
+    </section>
+
+    <!-- For whom -->
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-4 text-accent">For whom</h2>
+      <ul class="space-y-3 text-muted">
+        <li class="flex gap-3"><span class="text-warm">→</span> Builders of multi-step agent workflows that don't fit in one context window</li>
+        <li class="flex gap-3"><span class="text-warm">→</span> Anyone running Claude Code, Codex, or similar long-running LLM agents at scale</li>
+        <li class="flex gap-3"><span class="text-warm">→</span> Multi-agent systems that need durable handoff between specialized workers</li>
+        <li class="flex gap-3"><span class="text-warm">→</span> Operations that need to survive compactions, rate limits, and process restarts</li>
+        <li class="flex gap-3"><span class="text-warm">→</span> Anyone tired of treating chat history as state</li>
+      </ul>
+    </section>
+
+    <!-- Architecture principle -->
+    <section class="mb-16">
+      <div class="bg-panel border-l-4 border-accent p-8 rounded-r">
+        <h3 class="text-xl font-semibold mb-3">The file system IS the orchestrator</h3>
+        <p class="text-muted leading-relaxed">
+          No daemon. No broker. No external database. Just directory layout + POSIX atomic rename + JSON files. Any agent with read/write access is a participant. UNIX shops have done this for 30 years — Maildir (1995), cron + lock files, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">/var/spool/</code>. swarm-lib applies the discipline to LLM-driven agent work.
+        </p>
+      </div>
+    </section>
+
+    <!-- Design -->
+    <section id="design" class="mb-16">
+      <h2 class="text-2xl font-bold mb-4 text-accent">Design</h2>
+      <p class="text-muted mb-4">v0.1 spec covers the substrate primitives, the <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json</code> schema, the claim protocol, and the Tribunal port plan that validates it.</p>
+      <div class="flex flex-wrap gap-3">
+        <a href="https://github.com/dpdanpittman/swarm-lib/blob/main/DESIGN.md" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">DESIGN.md</a>
+        <a href="https://github.com/dpdanpittman/swarm-lib/blob/main/DESIGN.html" class="border border-border px-5 py-2.5 rounded font-semibold hover:bg-panel transition">DESIGN.html</a>
+      </div>
+    </section>
+
+    <!-- Roadmap -->
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-4 text-accent">Roadmap</h2>
+      <div class="space-y-3 text-muted">
+        <div class="flex gap-4 items-baseline"><span class="text-warm font-mono w-16 shrink-0">v0.1</span><span>Substrate primitives + Tribunal port (in design)</span></div>
+        <div class="flex gap-4 items-baseline"><span class="text-muted font-mono w-16 shrink-0">v0.2</span><span>HMD triage layer (cheap-model classify → expensive-model escalation) + orphan cleanup daemon</span></div>
+        <div class="flex gap-4 items-baseline"><span class="text-muted font-mono w-16 shrink-0">v0.3</span><span>Multi-host coordination (shared queue) + n8n federation + Kanban UI</span></div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-border pt-8 text-sm text-muted">
+      <p>MIT licensed. Built as part of the broader agentic infrastructure work at <a href="https://mabus.ai" class="text-accent hover:underline">mabus.ai</a>.</p>
+      <p class="mt-2">Inspired by the Inkcloud Architecture Post-Mortem ("Unix Swarm Blueprint"). Prior art: Maildir, cron + <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">/var/spool/</code>, GitHub Actions reusable workflows.</p>
+    </footer>
+
+  </main>
+</body>
+</html>

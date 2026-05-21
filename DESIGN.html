@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>swarm-lib — Design Spec v0.1</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #15181f;
+        --panel-soft: #1a1e26;
+        --text: #d8dde7;
+        --muted: #8a93a3;
+        --accent: #6fd3ff;
+        --accent-warm: #f0b46a;
+        --accent-green: #95d36b;
+        --border: #232833;
+        --code-bg: #11141a;
+        --code-border: #2a2f3a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        background: var(--bg);
+        color: var(--text);
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font:
+          15px/1.55 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          system-ui,
+          sans-serif;
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 48px 32px 96px;
+      }
+      h1 {
+        font-size: 28px;
+        line-height: 1.2;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 12px;
+        margin: 0 0 12px;
+      }
+      .subtitle {
+        color: var(--muted);
+        margin: 0 0 24px;
+        font-size: 14px;
+      }
+      h2 {
+        font-size: 22px;
+        margin-top: 44px;
+        color: var(--accent);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 6px;
+      }
+      h3 {
+        font-size: 17px;
+        margin-top: 24px;
+        color: var(--accent-warm);
+      }
+      h4 {
+        font-size: 15px;
+        margin-top: 18px;
+        margin-bottom: 6px;
+      }
+      p {
+        margin: 8px 0 12px;
+      }
+      hr {
+        border: 0;
+        border-top: 1px solid var(--border);
+        margin: 32px 0;
+      }
+      ul,
+      ol {
+        padding-left: 22px;
+      }
+      li {
+        margin: 4px 0;
+      }
+      code {
+        font:
+          13px/1.5 "JetBrains Mono",
+          "Fira Code",
+          Consolas,
+          monospace;
+        background: var(--code-bg);
+        border: 1px solid var(--code-border);
+        border-radius: 3px;
+        padding: 1px 5px;
+      }
+      pre {
+        background: var(--code-bg);
+        border: 1px solid var(--code-border);
+        border-radius: 6px;
+        padding: 14px 16px;
+        overflow-x: auto;
+        font:
+          13px/1.5 "JetBrains Mono",
+          "Fira Code",
+          Consolas,
+          monospace;
+      }
+      pre code {
+        background: none;
+        border: 0;
+        padding: 0;
+      }
+      table {
+        border-collapse: collapse;
+        margin: 12px 0 20px;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid var(--border);
+        padding: 8px 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: var(--panel-soft);
+        color: var(--accent);
+        font-weight: 600;
+      }
+      tr:nth-child(even) td {
+        background: var(--panel);
+      }
+      .tldr {
+        background: var(--panel);
+        border-left: 3px solid var(--accent);
+        padding: 14px 18px;
+        margin: 16px 0 24px;
+        border-radius: 0 6px 6px 0;
+      }
+      blockquote {
+        border-left: 3px solid var(--accent-warm);
+        background: var(--panel);
+        margin: 10px 0;
+        padding: 8px 14px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .footer-note {
+        color: var(--muted);
+        font-size: 13px;
+        border-top: 1px solid var(--border);
+        padding-top: 14px;
+        margin-top: 48px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>swarm-lib — Design Spec v0.1</h1>
+    <p class="subtitle">
+      Status: <b>Draft — pending review</b> · Inspired by the Inkcloud
+      Architecture Post-Mortem ("Unix Swarm Blueprint")
+    </p>
+
+    <div class="tldr">
+      A small Python + Bash library that gives agentic workflows three
+      primitives:
+      <ol style="margin: 8px 0 0 0">
+        <li>
+          <b>Atomic-rename task queueing</b> — multiple workers can race for
+          tasks; exactly one wins, no external broker
+        </li>
+        <li>
+          <b><code>status.json</code> checkpointing</b> — durable handoff so any
+          agent can resume from a file, never from chat history
+        </li>
+        <li>
+          <b>A generic <code>worker_loop.sh</code></b> — polls a queue, claims a
+          task, invokes a handler, moves the result
+        </li>
+      </ol>
+      v0.1 substrate only. Triage (HMD), orphan cleanup, multi-host federation,
+      and a Kanban UI deferred to v0.2+. Goal: prove the substrate by porting
+      Tribunal's 7-skill chain onto it.
+    </div>
+
+    <h2>Why this exists</h2>
+
+    <table>
+      <tr>
+        <th>Problem</th>
+        <th>Manifestation</th>
+        <th>swarm-lib answer</th>
+      </tr>
+      <tr>
+        <td><b>Context starvation</b></td>
+        <td>
+          Long conversation accumulates context, hits compaction, in-flight work
+          dies
+        </td>
+        <td>
+          Tasks become claimable by fresh contexts; no single conversation owns
+          the whole chain
+        </td>
+      </tr>
+      <tr>
+        <td><b>Sync tool-call blocking</b></td>
+        <td>
+          Planner holds an expensive context window open while subprocess churns
+          for 30 min
+        </td>
+        <td>
+          The "Yield Rule": planner decomposes → writes payload to queue →
+          exits. Consumers claim asynchronously.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Chat-history-as-state</b></td>
+        <td>If the conversation dies, the work dies</td>
+        <td>
+          <code>status.json</code> is the canonical state. Chat is volatile; the
+          file is the contract.
+        </td>
+      </tr>
+    </table>
+
+    <p>
+      UNIX shops have had this discipline for 30 years (Maildir, cron + lock
+      files, <code>/var/spool/</code>). swarm-lib applies it to LLM-driven agent
+      work.
+    </p>
+
+    <h2>Architectural principles</h2>
+
+    <h3>1. The file system IS the orchestrator</h3>
+    <p>
+      No daemon, no broker, no external database. Directory layout + POSIX
+      atomic rename + JSON files do all coordination. Any agent with read/write
+      access to the queue directory is a participant.
+    </p>
+
+    <h3>2. The Yield Rule</h3>
+    <p>
+      A high-context agent (planner) NEVER blocks waiting on subprocess output.
+      It decomposes → enqueues atomically → <b>exits immediately</b>, freeing
+      its context. Fresh consumers claim tasks in their own short-lived
+      contexts. The planner can be re-invoked later from
+      <code>status.json</code>.
+    </p>
+
+    <h3>3. Atomic-rename queueing (Maildir physics)</h3>
+    <p>
+      Producers stage tasks under <code>pending/</code>. Consumers claim by
+      <code
+        >os.replace(pending/&lt;id&gt;.json,
+        claimed/&lt;worker_id&gt;/&lt;id&gt;.json)</code
+      >. POSIX guarantees the rename is atomic on the same filesystem — two
+      consumers racing for the same task, exactly one wins.
+    </p>
+
+    <h3>4. Agents are interchangeable</h3>
+    <p>
+      A worker is anything that can read a JSON task file, do work, and write a
+      JSON result file:
+    </p>
+    <ul>
+      <li>Claude Code (Mabus) with a specific skill</li>
+      <li>
+        Ollama-backed local agents (via <code>ollama-assistant</code> MCP)
+      </li>
+      <li>n8n flows</li>
+      <li>Plain shell scripts</li>
+      <li>Future agents that don't exist yet</li>
+    </ul>
+    <p>
+      Task ownership lives in the filesystem path (the
+      <code>claimed/&lt;worker_id&gt;/</code> directory), not in a database row
+      tied to a specific agent identity.
+    </p>
+
+    <h3>5. Cold-start recoverability</h3>
+    <p>Any new agent picks up an in-flight workflow by reading two files:</p>
+    <ul>
+      <li>
+        <code>portrait.md</code> — identity continuity (from session-essence)
+      </li>
+      <li><code>status.json</code> — task-state continuity (from swarm-lib)</li>
+    </ul>
+    <p>
+      Compactions, crashes, rate limits, multi-day pauses — all become
+      indistinguishable from a clean restart.
+    </p>
+
+    <h2>Directory layout</h2>
+
+    <pre><code>&lt;consumer-repo&gt;/.swarm/&lt;run-id&gt;/
+├── BACKLOG.md           # original human intent (optional, free-form)
+├── status.json          # current checkpoint state (durable handoff)
+├── pending/             # tasks waiting to be claimed
+│   └── &lt;task_id&gt;.json
+├── claimed/             # tasks currently being worked on, namespaced by worker
+│   └── &lt;worker_id&gt;/
+│       └── &lt;task_id&gt;.json
+├── done/                # successfully completed tasks
+│   └── &lt;task_id&gt;.json
+├── failed/              # quarantined tasks (worker death without clean handoff)
+│   └── &lt;task_id&gt;.json
+└── artifacts/           # task outputs — markdown, JSON, logs, anything
+    └── &lt;task_id&gt;.&lt;ext&gt;</code></pre>
+
+    <p>
+      <b>Cross-project federation</b>: when a task spans multiple consumer repos
+      (Mabus → n8n → Mabus), the run directory lives under
+      <code>~/.swarm/&lt;run-id&gt;/</code> instead. v0.1 doesn't enforce this
+      distinction — <code>worker_loop.sh</code> takes a
+      <code>--run-dir</code> arg.
+    </p>
+
+    <h2><code>status.json</code> schema</h2>
+
+    <pre><code>{
+  "schema_version": "0.1",
+  "run_id": "tribunal-r42x",
+  "checkpoint": {
+    "summary": "Completed plan; ready for implement stage",
+    "next_step": "Invoke implement skill with plan output as input",
+    "next_task_id": "t.r42x.implement",
+    "resume_command": null,
+    "risk": "Plan references xion-stytch-proxy hostnames; ensure consumer has env access",
+    "completed_tasks": ["t.r42x.intent", "t.r42x.plan"],
+    "current_worker": null,
+    "timestamp": "2026-05-20T18:45:11Z"
+  },
+  "metadata": {
+    "created_by": "mabus",
+    "consumer": "tribunal",
+    "tier_hint": "opus"
+  }
+}</code></pre>
+
+    <table>
+      <tr>
+        <th>Field</th>
+        <th>Type</th>
+        <th>Required</th>
+        <th>Notes</th>
+      </tr>
+      <tr>
+        <td><code>schema_version</code></td>
+        <td>string</td>
+        <td>yes</td>
+        <td>semver; lib refuses to read unknown majors</td>
+      </tr>
+      <tr>
+        <td><code>run_id</code></td>
+        <td>string</td>
+        <td>yes</td>
+        <td>unique per workflow run</td>
+      </tr>
+      <tr>
+        <td><code>checkpoint.summary</code></td>
+        <td>string</td>
+        <td>yes</td>
+        <td>human-readable "what was just finished"</td>
+      </tr>
+      <tr>
+        <td><code>checkpoint.next_step</code></td>
+        <td>string</td>
+        <td>yes</td>
+        <td>concrete "what to do next" — agent-readable</td>
+      </tr>
+      <tr>
+        <td><code>checkpoint.next_task_id</code></td>
+        <td>string | null</td>
+        <td>yes</td>
+        <td>the task_id to claim next; null = workflow complete</td>
+      </tr>
+      <tr>
+        <td><code>checkpoint.resume_command</code></td>
+        <td>string | null</td>
+        <td>no</td>
+        <td>
+          optional; <b>must be validated against allowlist before exec</b>
+        </td>
+      </tr>
+      <tr>
+        <td><code>checkpoint.risk</code></td>
+        <td>string</td>
+        <td>yes</td>
+        <td>known blockers or fragile state</td>
+      </tr>
+      <tr>
+        <td><code>checkpoint.completed_tasks</code></td>
+        <td>string[]</td>
+        <td>yes</td>
+        <td>task_ids that have run</td>
+      </tr>
+      <tr>
+        <td><code>checkpoint.current_worker</code></td>
+        <td>string | null</td>
+        <td>yes</td>
+        <td>worker_id currently holding a claim</td>
+      </tr>
+      <tr>
+        <td><code>checkpoint.timestamp</code></td>
+        <td>ISO-8601</td>
+        <td>yes</td>
+        <td>last update</td>
+      </tr>
+      <tr>
+        <td><code>metadata.*</code></td>
+        <td>object</td>
+        <td>no</td>
+        <td>freeform; consumer-specific</td>
+      </tr>
+    </table>
+
+    <p>
+      <b>Evolution policy</b>: minor bumps additive only. Major bumps breaking;
+      lib supports reading the previous major for one cycle to allow migration.
+    </p>
+
+    <blockquote>
+      Pushback note: I removed the <code>resume_command</code> "blindly execute"
+      framing from the slideshow. If consumers want a shell-resumable workflow,
+      the command must be validated against an allowlist before exec. Default is
+      <code>null</code>; LLM-driven workflows ignore it.
+    </blockquote>
+
+    <h2>Task schema</h2>
+
+    <pre><code>{
+  "task_id": "t.r42x.implement",
+  "task_type": "implement",
+  "run_id": "tribunal-r42x",
+  "created_at": "2026-05-20T18:42:11Z",
+  "created_by": "mabus",
+  "depends_on": ["t.r42x.plan"],
+  "payload": {
+    "skill": "tribunal-implement",
+    "input_artifacts": ["artifacts/t.r42x.plan.md"],
+    "output_artifact": "artifacts/t.r42x.implement.md"
+  },
+  "tier_hint": "sonnet",
+  "deadline": null
+}</code></pre>
+
+    <ul>
+      <li>
+        <code>payload</code> is consumer-specific; lib doesn't validate its
+        shape
+      </li>
+      <li>
+        <code>tier_hint</code> is an optional cost-routing signal (used in v0.2)
+      </li>
+      <li>
+        <code>depends_on</code> is honored by <code>worker_loop.sh</code> —
+        won't claim until deps are in <code>completed_tasks</code>
+      </li>
+      <li>
+        <code>deadline</code> is informational in v0.1; v0.2 may route to a
+        scheduler worker
+      </li>
+    </ul>
+
+    <h2>Claim protocol</h2>
+
+    <h3>Producer (enqueue)</h3>
+    <pre><code>from swarm_lib import claims
+
+claims.enqueue(
+    run_dir="~/src/tribunal/run/r42x",
+    task_id="t.r42x.implement",
+    task_type="implement",
+    payload={...},
+    depends_on=["t.r42x.plan"],
+)</code></pre>
+
+    <p>
+      Internally: write JSON to temp file → fsync →
+      <code>os.replace(tmp, pending/&lt;id&gt;.json)</code> → atomic publish.
+    </p>
+
+    <h3>Consumer (claim)</h3>
+    <pre><code>task = claims.try_claim(
+    run_dir="~/src/tribunal/run/r42x",
+    worker_id="mabus-tribunal-1",
+    task_type_filter=["implement", "verify"],
+)
+if task is None:
+    return  # no claimable task
+
+do_work(task)
+claims.complete(task, success=True, artifact_path="...")</code></pre>
+
+    <p>
+      Internally <code>try_claim</code> scans <code>pending/</code>, attempts
+      <code>os.replace</code> per candidate, returns the first successful claim.
+      <code>OSError</code> means another worker won — try next candidate.
+    </p>
+
+    <h3>Orphan recovery (v0.2)</h3>
+    <p>
+      If a worker dies mid-claim, the task is stuck in
+      <code>claimed/&lt;worker_id&gt;/</code>. v0.2 adds cron-driven cleanup.
+      <b>v0.1 ignores this</b>; manual cleanup is fine for now.
+    </p>
+
+    <h2><code>worker_loop.sh</code> contract</h2>
+
+    <pre><code>worker_loop.sh \
+  --run-dir ~/src/tribunal/run/r42x \
+  --worker-id mabus-tribunal-1 \
+  --handler tribunal_handle.sh \
+  --task-type-filter implement,verify \
+  --poll-interval 5 \
+  --max-iterations 100</code></pre>
+
+    <p>
+      Loop body: try_claim → if claimed, invoke handler with task JSON on stdin
+      → on handler exit, mark done/failed → repeat.
+    </p>
+
+    <p>
+      A handler is any executable that reads task JSON from stdin, writes its
+      output to <code>$SWARM_ARTIFACT_PATH</code>, optionally enqueues follow-up
+      tasks, updates <code>status.json</code>, and exits 0/non-zero.
+    </p>
+
+    <h2>Python API surface (v0.1)</h2>
+
+    <pre><code># swarm_lib/claims.py
+def enqueue(run_dir, task_id, task_type, payload,
+            depends_on=None, tier_hint=None, created_by=None): ...
+def try_claim(run_dir, worker_id, task_type_filter=None): ...
+def complete(task, success, artifact_path=None): ...
+
+# swarm_lib/status.py
+def read(run_dir): ...
+def write(run_dir, summary, next_step, next_task_id,
+          risk="", current_worker=None, metadata=None): ...
+def append_completed(run_dir, task_id): ...</code></pre>
+
+    <h2>Tribunal port plan</h2>
+
+    <h3>Today's shape</h3>
+    <p>
+      <code>/tribunal &lt;prompt&gt;</code> runs intent → plan → implement →
+      review → verify → classify → incentive sequentially in one Claude Code
+      context. Long probes blow the window. Compaction loses the chain.
+    </p>
+
+    <h3>Ported shape</h3>
+    <pre><code>~/src/tribunal/run/&lt;run-id&gt;/
+├── BACKLOG.md           # user's /tribunal prompt verbatim
+├── status.json
+├── pending/ claimed/ done/ failed/
+└── artifacts/
+    ├── 01-intent.md
+    ├── 02-plan.md
+    ├── 03-implement.md
+    ├── 04-review.md
+    ├── 05-verify.md
+    ├── 06-classify.md
+    └── 07-incentive.md</code></pre>
+
+    <h3>Flow</h3>
+    <ol>
+      <li>
+        <code>/tribunal &lt;prompt&gt;</code> writes <code>BACKLOG.md</code> +
+        enqueues <code>intent</code> task + writes initial
+        <code>status.json</code> → exits
+      </li>
+      <li>
+        Worker loop polls <code>pending/</code> → claims intent → invokes
+        <code>claude -p --skill tribunal-intent</code>
+      </li>
+      <li>
+        Intent handler writes <code>artifacts/01-intent.md</code>, enqueues
+        <code>plan</code>, updates status, exits
+      </li>
+      <li>
+        Worker loop continues through plan → implement → review → verify →
+        classify → incentive, each in a fresh context
+      </li>
+      <li>
+        Final task completes;
+        <code>status.json::next_task_id = null</code> signals workflow complete
+      </li>
+    </ol>
+
+    <h3>Model tier mapping</h3>
+    <table>
+      <tr>
+        <th>Skill</th>
+        <th>Tier</th>
+        <th>Why</th>
+      </tr>
+      <tr>
+        <td>intent</td>
+        <td>haiku</td>
+        <td>Cheap, just structures the user's input</td>
+      </tr>
+      <tr>
+        <td>plan</td>
+        <td>opus</td>
+        <td>Hardest reasoning step</td>
+      </tr>
+      <tr>
+        <td>implement</td>
+        <td>sonnet</td>
+        <td>Mechanical from plan</td>
+      </tr>
+      <tr>
+        <td>review</td>
+        <td>opus</td>
+        <td>Adversarial probe quality matters here</td>
+      </tr>
+      <tr>
+        <td>verify</td>
+        <td>sonnet</td>
+        <td>Pattern matching</td>
+      </tr>
+      <tr>
+        <td>classify</td>
+        <td>haiku</td>
+        <td>Just categorization</td>
+      </tr>
+      <tr>
+        <td>incentive</td>
+        <td>sonnet</td>
+        <td>Generative but bounded</td>
+      </tr>
+    </table>
+
+    <h3>Compaction survival</h3>
+    <p>
+      At any point, if the worker dies, the next agent reads
+      <code>status.json</code>, sees <code>next_task_id</code>, claims it from
+      <code>pending/</code>, resumes. No conversation history needed.
+    </p>
+
+    <h2>Out of scope for v0.1</h2>
+    <ul>
+      <li><b>HMD triage layer</b> — v0.2</li>
+      <li><b>Orphan cleanup daemon</b> — v0.2</li>
+      <li><b>Multi-host coordination</b> — v0.3</li>
+      <li><b>Kanban UI</b> — v0.3 if a second contributor lands</li>
+      <li><b>n8n federation</b> — v0.3</li>
+      <li>
+        <b>Full agents-are-interchangeable abstraction</b> — applied gradually
+      </li>
+    </ul>
+
+    <h2>Build plan</h2>
+
+    <table>
+      <tr>
+        <th>Day</th>
+        <th>Deliverable</th>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td>This design doc (v0.1 spec)</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><code>swarm_lib/claims.py</code> + pytest</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><code>swarm_lib/status.py</code> + pytest</td>
+      </tr>
+      <tr>
+        <td>4</td>
+        <td><code>worker_loop.sh</code> + integration smoke test</td>
+      </tr>
+      <tr>
+        <td>5</td>
+        <td>Tribunal port: <code>tribunal-driver</code> + handler shells</td>
+      </tr>
+      <tr>
+        <td>6</td>
+        <td>Tribunal port: end-to-end run + iterate</td>
+      </tr>
+      <tr>
+        <td>7</td>
+        <td>README + minimal docs + v0.1.0 tag</td>
+      </tr>
+    </table>
+
+    <h2>Open questions for review</h2>
+
+    <ol>
+      <li>
+        <b>Worker ID convention</b>: PID-based (auto, transient) vs named
+        (<code>mabus-tribunal-1</code>, durable). I lean named.
+      </li>
+      <li>
+        <b>Run directory location</b>: per-consumer-repo
+        <code>&lt;repo&gt;/.swarm/</code> vs shared
+        <code>~/.swarm/&lt;run-id&gt;/</code>. Lean per-consumer-repo for v0.1.
+      </li>
+      <li>
+        <b>Task ID format</b>: short prefix + run-id + type
+        (<code>t.r42x.implement</code>) vs UUID vs ISO timestamp. Lean
+        short-prefix-with-run-id.
+      </li>
+      <li>
+        <b>Atomic write pattern</b>: temp-then-rename (safer) vs direct write
+        (faster). Lean temp-then-rename.
+      </li>
+      <li>
+        <b>Schema versioning</b>: strict refuse-unknown vs warn-and-attempt.
+        Lean strict.
+      </li>
+      <li><b>License</b>: confirmed MIT.</li>
+      <li>
+        <b>Single source of truth for completion</b>:
+        <code>status.json::completed_tasks</code> (cached) +
+        <code>done/</code> directory (artifact-of-record). They should match;
+        drift is a bug.
+      </li>
+    </ol>
+
+    <h2>Risks</h2>
+    <ul>
+      <li>
+        <b>Partial writes</b>: mitigated by temp+rename pattern, lib-enforced
+      </li>
+      <li>
+        <b>Filesystem mismatch</b>: lib validates source + dest on same mount at
+        startup
+      </li>
+      <li>
+        <b>Race between scan and claim</b>: expected; <code>OSError</code> =
+        lost race, loop continues
+      </li>
+      <li>
+        <b>Compaction during status write</b>: low risk via temp-rename
+        atomicity
+      </li>
+      <li>
+        <b>Schema drift</b>: <code>metadata.*</code> preserved on
+        read-modify-write
+      </li>
+    </ul>
+
+    <h2>Inspiration / prior art</h2>
+    <ul>
+      <li>
+        <b>Inkcloud Architecture Post-Mortem</b> — direct inspiration for Yield
+        Rule + filesystem-as-orchestrator
+      </li>
+      <li>
+        <b>Maildir</b> (1995) — atomic rename for email delivery; same physics
+      </li>
+      <li>
+        <b>cron + lock files</b> + <code>/var/spool/</code> — UNIX queue
+        patterns since the 90s
+      </li>
+      <li>
+        <b>GitHub Actions reusable workflows + <code>workflow_call</code></b> —
+        same yield rule applied to CI/CD (per the DO-302 work)
+      </li>
+    </ul>
+
+    <div class="footer-note">
+      Source: <code>~/src/swarm-lib/DESIGN.md</code><br />
+      Once this gets review/redirect, <code>claims.py</code> work starts per the
+      build plan. No code lands until the design is greenlit.
+    </div>
+  </body>
+</html>
