@@ -30,8 +30,14 @@ Homepage = "https://mabus.ai/swarm/"
 Repository = "https://github.com/dpdanpittman/swarm-lib"
 Issues = "https://github.com/dpdanpittman/swarm-lib/issues"
 
+[project.scripts]
+swarm-cli = "swarm_lib.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["swarm_lib*"]
+
+[tool.setuptools.package-data]
+swarm_lib = ["worker_loop.sh"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
