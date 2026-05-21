@@ -1,9 +1,9 @@
 """Atomic-rename task queue primitives.
 
-Producers enqueue tasks via ``enqueue``. Consumers race for them via
-``try_claim`` (POSIX ``os.replace`` is the atomic primitive — exactly one
+Producers enqueue tasks via :func:`enqueue`. Consumers race for them via
+:func:`try_claim` (POSIX ``os.replace`` is the atomic primitive — exactly one
 worker wins per task). Completions move the task to ``done/`` or ``failed/``
-via ``complete``.
+via :func:`complete`.
 
 The substrate is the filesystem. There is no broker, no daemon, no database.
 """
@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
+
+from swarm_lib._io import atomic_write_json, now_iso, read_json
 
 
 # ---------------------------------------------------------------------------
@@ -40,38 +40,8 @@ class Task:
 
 
 # ---------------------------------------------------------------------------
-# Internal I/O helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
-
-def _atomic_write_json(path: Path, data: Any) -> None:
-    """Atomically write JSON to ``path`` via temp file + rename in same directory.
-
-    Ensures readers never see a partial write. Requires write access to
-    ``path.parent``.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        suffix=".tmp",
-        prefix=f".{path.name}.",
-        dir=path.parent,
-    )
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
-
-
-def _read_json(path: Path) -> Any:
-    with open(path, "r") as f:
-        return json.load(f)
-
 
 def _ensure_run_dir(run_dir: Path) -> Path:
     """Resolve run_dir and create the standard subdirectories."""
@@ -81,16 +51,12 @@ def _ensure_run_dir(run_dir: Path) -> Path:
     return run_dir
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
 def _resolve_run_id(run_dir: Path) -> str:
     """Read run_id from status.json if it exists, otherwise infer from dir name."""
     status_path = run_dir / "status.json"
     if status_path.exists():
         try:
-            return _read_json(status_path).get("run_id", run_dir.name)
+            return read_json(status_path).get("run_id", run_dir.name)
         except (OSError, json.JSONDecodeError):
             pass
     return run_dir.name
@@ -102,7 +68,7 @@ def _completed_task_ids(run_dir: Path) -> set[str]:
     if not status_path.exists():
         return set()
     try:
-        status = _read_json(status_path)
+        status = read_json(status_path)
         return set(status.get("checkpoint", {}).get("completed_tasks", []))
     except (OSError, json.JSONDecodeError):
         return set()
@@ -124,16 +90,16 @@ def enqueue(
 ) -> None:
     """Atomically enqueue a task to ``<run_dir>/pending/<task_id>.json``.
 
-    Idempotent in the sense that re-enqueueing with the same task_id overwrites
-    the pending file. Caller is responsible for task_id uniqueness within a
-    run.
+    Idempotent in the sense that re-enqueueing with the same ``task_id``
+    overwrites the pending file. Caller is responsible for task_id uniqueness
+    within a run.
     """
     rd = _ensure_run_dir(Path(run_dir))
     task_data = {
         "task_id": task_id,
         "task_type": task_type,
         "run_id": _resolve_run_id(rd),
-        "created_at": _now_iso(),
+        "created_at": now_iso(),
         "created_by": created_by,
         "depends_on": depends_on or [],
         "payload": payload,
@@ -141,7 +107,7 @@ def enqueue(
         "deadline": deadline,
     }
     target = rd / "pending" / f"{task_id}.json"
-    _atomic_write_json(target, task_data)
+    atomic_write_json(target, task_data)
 
 
 def try_claim(
@@ -151,10 +117,11 @@ def try_claim(
 ) -> Optional[Task]:
     """Attempt to atomically claim a pending task.
 
-    Returns a ``Task`` on success (file is now under
+    Returns a :class:`Task` on success (file is now under
     ``claimed/<worker_id>/<task_id>.json``) or ``None`` if nothing claimable.
 
     Tasks are skipped when:
+
     - their ``task_type`` is not in ``task_type_filter`` (when provided)
     - any ``depends_on`` entry is not in ``status.json::completed_tasks``
     - another worker won the atomic-rename race
@@ -169,7 +136,7 @@ def try_claim(
     # Sorted scan for deterministic order across workers
     for task_file in sorted(pending_dir.glob("*.json")):
         try:
-            task_data = _read_json(task_file)
+            task_data = read_json(task_file)
         except (json.JSONDecodeError, OSError):
             # Malformed file or it disappeared mid-scan; skip
             continue
@@ -181,7 +148,6 @@ def try_claim(
         if not deps.issubset(completed):
             continue
 
-        # Attempt atomic claim
         target = worker_claim_dir / task_file.name
         try:
             os.replace(task_file, target)
@@ -218,6 +184,10 @@ def complete(
 
     The ``artifact_path`` argument is informational only in v0.1 — the lib
     does not move or validate it.
+
+    On success, delegates to :func:`swarm_lib.status.append_completed` to
+    record the task_id (only if a ``status.json`` already exists; consumers
+    who skip status tracking are unaffected).
     """
     if task._path is None:
         raise ValueError(
@@ -233,18 +203,7 @@ def complete(
 
     os.replace(task._path, target)
 
-    # Update status.json::completed_tasks on success.
-    # (status.py will own this fully in Day-3 work; inline for v0.1 substrate.)
-    if success:
-        status_path = run_dir / "status.json"
-        if status_path.exists():
-            try:
-                status_data = _read_json(status_path)
-            except (OSError, json.JSONDecodeError):
-                status_data = {"checkpoint": {}}
-            ck = status_data.setdefault("checkpoint", {})
-            completed = ck.setdefault("completed_tasks", [])
-            if task.task_id not in completed:
-                completed.append(task.task_id)
-            ck["timestamp"] = _now_iso()
-            _atomic_write_json(status_path, status_data)
+    if success and (run_dir / "status.json").exists():
+        # Local import to avoid module-load cycle
+        from swarm_lib import status
+        status.append_completed(run_dir, task.task_id)
