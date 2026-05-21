@@ -1,0 +1,120 @@
+# swarm-lib marketing site — nginx serving the Astro build output.
+# Mirrors the mabus-website deployment shape (vanilla nginx + hostPath + hostPort).
+#
+# How it gets served:
+#   Caddy on zaphod → handle_path /swarm/* → reverse_proxy localhost:3402
+#   localhost:3402 → this pod's nginx → /usr/share/nginx/html (mounted from hostPath)
+#
+# Build flow (on zaphod):
+#   cd ~/src/swarm-lib/site && npm install && npm run build
+#   # Astro emits to site/dist/ — that's what nginx serves.
+#
+# Apply (from k8s-control):
+#   sudo kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f swarm-website.yaml
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swarm-website-nginx
+  namespace: zaphod
+data:
+  default.conf: |
+    server {
+      listen 80;
+      server_name _;
+      root /usr/share/nginx/html;
+      index index.html;
+
+      # Astro builds with base=/swarm, so Caddy strips /swarm and forwards
+      # everything else to nginx. Files at /, /index.html, /styles.css, etc.
+
+      location / {
+        try_files $uri $uri/ $uri/index.html =404;
+      }
+
+      # Gzip the obvious text payloads
+      gzip on;
+      gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+      gzip_min_length 256;
+
+      # Long-cache hashed assets (Astro emits with content-hashed filenames)
+      location ~ \.(css|js|woff2?|svg|png|jpg|jpeg|webp|ico)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+      }
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swarm-website
+  namespace: zaphod
+  labels:
+    app: swarm-website
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: swarm-website
+  template:
+    metadata:
+      labels:
+        app: swarm-website
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: zaphod
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - name: http
+              containerPort: 80
+              hostPort: 3402
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          volumeMounts:
+            - name: site-content
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+      volumes:
+        - name: site-content
+          hostPath:
+            path: /home/zaphod-beeblebox/src/swarm-lib/site/dist
+            type: Directory
+        - name: nginx-config
+          configMap:
+            name: swarm-website-nginx
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swarm-website
+  namespace: zaphod
+  labels:
+    app: swarm-website
+spec:
+  type: ClusterIP
+  selector:
+    app: swarm-website
+  ports:
+    - port: 80
+      targetPort: 80
