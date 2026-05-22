@@ -12,16 +12,21 @@ Subcommands:
   swarm-cli status-init   — create a fresh status.json for a new run
   swarm-cli status-show   — print the current status.json as JSON
   swarm-cli status-write  — update status.json (preserves completed_tasks)
+  swarm-cli heartbeat     — touch this worker's heartbeat (orphan-recovery contract)
+  swarm-cli reap          — return stale claims to pending/
+  swarm-cli ls            — human-readable summary of a run (or ~/.swarm/* in aggregate)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+from typing import Optional
 
-from swarm_lib import claims, status
+from swarm_lib import claims, orphan, status
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +185,177 @@ def cmd_status_write(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# heartbeat
+# ---------------------------------------------------------------------------
+
+def cmd_heartbeat(args: argparse.Namespace) -> int:
+    orphan.write_heartbeat(
+        run_dir=args.run_dir,
+        worker_id=args.worker_id,
+        note=args.note or "",
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# reap
+# ---------------------------------------------------------------------------
+
+def cmd_reap(args: argparse.Namespace) -> int:
+    result = orphan.reap(
+        run_dir=args.run_dir,
+        stale_after_seconds=args.stale_after,
+    )
+    output = {
+        "run_dir": str(result.run_dir),
+        "stale_after_seconds": result.stale_after_seconds,
+        "reaped_count": result.reaped_count,
+        "reaped": [
+            {
+                "worker_id": r.worker_id,
+                "task_id": r.task_id,
+                "age_seconds": r.age_seconds,
+            }
+            for r in result.reaped
+        ],
+        "skipped_live": result.skipped_live,
+    }
+    print(json.dumps(output, indent=2))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# ls — human-readable summary
+# ---------------------------------------------------------------------------
+
+# ANSI escape helpers. No-op when stdout isn't a tty (piped, redirected, CI).
+def _color(enabled: bool, code: str, text: str) -> str:
+    if not enabled:
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _summarize_run(run_dir: Path, color: bool) -> dict:
+    """Return per-run summary dict for ls output."""
+    summary: dict = {
+        "run_dir": str(run_dir),
+        "run_id": run_dir.name,
+        "exists": run_dir.exists(),
+        "pending": 0,
+        "claimed_by_worker": {},
+        "done": 0,
+        "failed": 0,
+        "next_step": None,
+        "next_task_id": None,
+        "last_completed": None,
+        "current_worker": None,
+        "completed_count": 0,
+    }
+
+    if not run_dir.exists():
+        return summary
+
+    pending_dir = run_dir / "pending"
+    done_dir = run_dir / "done"
+    failed_dir = run_dir / "failed"
+    claimed_dir = run_dir / "claimed"
+
+    if pending_dir.exists():
+        summary["pending"] = sum(1 for _ in pending_dir.glob("*.json"))
+    if done_dir.exists():
+        summary["done"] = sum(1 for _ in done_dir.glob("*.json"))
+    if failed_dir.exists():
+        summary["failed"] = sum(1 for _ in failed_dir.glob("*.json"))
+    if claimed_dir.exists():
+        for worker_dir in sorted(claimed_dir.iterdir()):
+            if not worker_dir.is_dir():
+                continue
+            n = sum(1 for _ in worker_dir.glob("*.json"))
+            if n > 0:
+                summary["claimed_by_worker"][worker_dir.name] = n
+
+    try:
+        s = status.read(run_dir)
+        summary["next_step"] = s.checkpoint.next_step or None
+        summary["next_task_id"] = s.checkpoint.next_task_id
+        summary["current_worker"] = s.checkpoint.current_worker
+        summary["completed_count"] = len(s.checkpoint.completed_tasks)
+        if s.checkpoint.completed_tasks:
+            summary["last_completed"] = s.checkpoint.completed_tasks[-1]
+    except (FileNotFoundError, ValueError):
+        # No status.json yet (queue-only run) — fine
+        pass
+
+    return summary
+
+
+def _render_run_text(s: dict, color: bool) -> str:
+    """Multi-line plaintext rendering of one run summary."""
+    lines = []
+    header = _color(color, "1;36", s["run_id"])
+    lines.append(f"{header}  {s['run_dir']}")
+
+    pending = s["pending"]
+    done = s["done"]
+    failed = s["failed"]
+    claimed_total = sum(s["claimed_by_worker"].values())
+
+    pending_str = _color(color, "33" if pending else "2", f"pending={pending}")
+    claimed_str = _color(color, "34" if claimed_total else "2", f"claimed={claimed_total}")
+    done_str = _color(color, "32" if done else "2", f"done={done}")
+    failed_str = _color(color, "31" if failed else "2", f"failed={failed}")
+    lines.append(f"  {pending_str}  {claimed_str}  {done_str}  {failed_str}")
+
+    if s["claimed_by_worker"]:
+        for worker, n in s["claimed_by_worker"].items():
+            lines.append(f"    in flight: {worker} ({n})")
+
+    if s["next_task_id"]:
+        lines.append(f"  next: {_color(color, '36', s['next_task_id'])}  {s['next_step'] or ''}")
+    elif s["next_step"]:
+        lines.append(f"  next: {s['next_step']}")
+
+    if s["last_completed"]:
+        lines.append(f"  last completed: {s['last_completed']}  ({s['completed_count']} total)")
+
+    return "\n".join(lines)
+
+
+def cmd_ls(args: argparse.Namespace) -> int:
+    color = sys.stdout.isatty() and not args.no_color and not args.json
+
+    # Decide which run-dirs to summarize.
+    if args.run_dir:
+        run_dirs = [Path(args.run_dir).expanduser().resolve()]
+    else:
+        root = Path(args.root).expanduser().resolve() if args.root else Path.home() / ".swarm"
+        if not root.exists():
+            msg = {"error": f"no swarm root at {root}", "hint": "pass --run-dir to summarize a specific run"}
+            if args.json:
+                print(json.dumps(msg, indent=2))
+            else:
+                print(f"no swarm root at {root}; pass --run-dir to summarize a specific run", file=sys.stderr)
+            return 1
+        run_dirs = sorted(p for p in root.iterdir() if p.is_dir())
+        if not run_dirs:
+            if args.json:
+                print(json.dumps([], indent=2))
+            else:
+                print(f"no runs under {root}", file=sys.stderr)
+            return 0
+
+    summaries = [_summarize_run(rd, color) for rd in run_dirs]
+
+    if args.json:
+        print(json.dumps(summaries, indent=2))
+        return 0
+
+    rendered = [_render_run_text(s, color) for s in summaries]
+    print("\n\n".join(rendered))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
 
@@ -243,6 +419,44 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--current-worker")
     p.add_argument("--metadata", help="JSON string")
     p.set_defaults(func=cmd_status_write)
+
+    # heartbeat
+    p = sub.add_parser(
+        "heartbeat",
+        help="touch claimed/<worker>/.heartbeat so the reaper doesn't see this worker as dead",
+    )
+    p.add_argument("--run-dir", required=True)
+    p.add_argument("--worker-id", required=True)
+    p.add_argument("--note", help="free-form note (typically current task_id)")
+    p.set_defaults(func=cmd_heartbeat)
+
+    # reap
+    p = sub.add_parser(
+        "reap",
+        help="move stale claims back to pending/ (returns JSON summary)",
+    )
+    p.add_argument("--run-dir", required=True)
+    p.add_argument(
+        "--stale-after",
+        type=int,
+        default=orphan.DEFAULT_STALE_AFTER_SECONDS,
+        help=f"seconds since last heartbeat to consider stale (default: {orphan.DEFAULT_STALE_AFTER_SECONDS})",
+    )
+    p.set_defaults(func=cmd_reap)
+
+    # ls
+    p = sub.add_parser(
+        "ls",
+        help="human-readable summary of a run (or ~/.swarm/* if --run-dir omitted)",
+    )
+    p.add_argument(
+        "--run-dir",
+        help="single run directory; if omitted, scans --root (default ~/.swarm)",
+    )
+    p.add_argument("--root", help="parent dir to scan (default: ~/.swarm)")
+    p.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    p.add_argument("--no-color", action="store_true", help="disable ANSI color")
+    p.set_defaults(func=cmd_ls)
 
     return parser
 

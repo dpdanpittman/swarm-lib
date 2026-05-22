@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from swarm_lib._io import atomic_write_json, now_iso, read_json
+from swarm_lib._io import atomic_write_json, now_iso, read_json, status_lock
 
 
 SCHEMA_VERSION = "0.1"
@@ -135,38 +135,42 @@ def write(
 
     Preserves the existing ``completed_tasks`` list (use
     :func:`append_completed` to add to it) and merges ``metadata`` additively.
+
+    Concurrency: held under :func:`swarm_lib._io.status_lock` so concurrent
+    writes don't lose ``completed_tasks`` updates landed by other workers.
     """
     run_dir = Path(run_dir).expanduser().resolve()
 
-    try:
-        existing = read(run_dir)
-        completed = existing.checkpoint.completed_tasks
-        run_id = existing.run_id
-        existing_metadata = existing.metadata
-    except FileNotFoundError:
-        completed = []
-        run_id = run_dir.name
-        existing_metadata = {}
+    with status_lock(run_dir):
+        try:
+            existing = read(run_dir)
+            completed = existing.checkpoint.completed_tasks
+            run_id = existing.run_id
+            existing_metadata = existing.metadata
+        except FileNotFoundError:
+            completed = []
+            run_id = run_dir.name
+            existing_metadata = {}
 
-    merged_metadata = {**existing_metadata, **(metadata or {})}
+        merged_metadata = {**existing_metadata, **(metadata or {})}
 
-    status = Status(
-        schema_version=SCHEMA_VERSION,
-        run_id=run_id,
-        checkpoint=Checkpoint(
-            summary=summary,
-            next_step=next_step,
-            next_task_id=next_task_id,
-            risk=risk,
-            completed_tasks=completed,
-            current_worker=current_worker,
-            timestamp=now_iso(),
-            resume_command=resume_command,
-        ),
-        metadata=merged_metadata,
-    )
-    _write(run_dir, status)
-    return status
+        status = Status(
+            schema_version=SCHEMA_VERSION,
+            run_id=run_id,
+            checkpoint=Checkpoint(
+                summary=summary,
+                next_step=next_step,
+                next_task_id=next_task_id,
+                risk=risk,
+                completed_tasks=completed,
+                current_worker=current_worker,
+                timestamp=now_iso(),
+                resume_command=resume_command,
+            ),
+            metadata=merged_metadata,
+        )
+        _write(run_dir, status)
+        return status
 
 
 def append_completed(run_dir: Path | str, task_id: str) -> Status:
@@ -174,29 +178,34 @@ def append_completed(run_dir: Path | str, task_id: str) -> Status:
 
     If no ``status.json`` exists yet, one is initialized with minimal fields.
     Idempotent — calling twice with the same ``task_id`` is a no-op.
+
+    Concurrency: the entire read-modify-write is serialized via
+    :func:`swarm_lib._io.status_lock`. Without this, concurrent
+    ``complete()`` calls from N workers race and silently drop updates.
     """
     run_dir = Path(run_dir).expanduser().resolve()
 
-    try:
-        status = read(run_dir)
-    except FileNotFoundError:
-        status = Status(
-            schema_version=SCHEMA_VERSION,
-            run_id=run_dir.name,
-            checkpoint=Checkpoint(
-                summary="",
-                next_step="",
-                next_task_id=None,
-                timestamp=now_iso(),
-            ),
-        )
+    with status_lock(run_dir):
+        try:
+            status = read(run_dir)
+        except FileNotFoundError:
+            status = Status(
+                schema_version=SCHEMA_VERSION,
+                run_id=run_dir.name,
+                checkpoint=Checkpoint(
+                    summary="",
+                    next_step="",
+                    next_task_id=None,
+                    timestamp=now_iso(),
+                ),
+            )
 
-    if task_id not in status.checkpoint.completed_tasks:
-        status.checkpoint.completed_tasks.append(task_id)
-    status.checkpoint.timestamp = now_iso()
+        if task_id not in status.checkpoint.completed_tasks:
+            status.checkpoint.completed_tasks.append(task_id)
+        status.checkpoint.timestamp = now_iso()
 
-    _write(run_dir, status)
-    return status
+        _write(run_dir, status)
+        return status
 
 
 # ---------------------------------------------------------------------------

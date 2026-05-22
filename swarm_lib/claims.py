@@ -43,12 +43,48 @@ class Task:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+_SAME_FS_VALIDATED: set[Path] = set()
+
+
+class CrossFilesystemError(RuntimeError):
+    """Raised when run-dir subdirs span multiple filesystems.
+
+    Atomic-rename only holds on the same filesystem. If pending/ and claimed/
+    sit on different mount points, ``os.replace`` silently degrades to
+    copy+unlink and two workers can double-claim the same task.
+    """
+
+
 def _ensure_run_dir(run_dir: Path) -> Path:
-    """Resolve run_dir and create the standard subdirectories."""
+    """Resolve run_dir, create the standard subdirectories, and validate
+    that they all live on a single filesystem."""
     run_dir = Path(run_dir).expanduser().resolve()
     for sub in ("pending", "claimed", "done", "failed", "artifacts"):
         (run_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    _validate_same_filesystem(run_dir)
     return run_dir
+
+
+def _validate_same_filesystem(run_dir: Path) -> None:
+    """Refuse to operate if the queue subdirs are on different filesystems.
+
+    Cached per-run-dir so we pay the stat cost once per process.
+    """
+    if run_dir in _SAME_FS_VALIDATED:
+        return
+    devs = {}
+    for sub in ("pending", "claimed", "done", "failed"):
+        devs[sub] = (run_dir / sub).stat().st_dev
+    unique = set(devs.values())
+    if len(unique) > 1:
+        raise CrossFilesystemError(
+            "swarm-lib requires pending/, claimed/, done/, failed/ to live on "
+            "a single filesystem so os.replace stays atomic. Got "
+            f"{devs!r} under {run_dir}. Move the run directory to a single "
+            "mount point (avoid bind mounts or symlinks that cross filesystems)."
+        )
+    _SAME_FS_VALIDATED.add(run_dir)
 
 
 def _resolve_run_id(run_dir: Path) -> str:

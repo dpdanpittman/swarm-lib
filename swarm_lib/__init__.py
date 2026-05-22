@@ -9,8 +9,9 @@ Public API:
 - :mod:`swarm_lib.status` — durable checkpoint state (``status.json``)
 """
 
-from swarm_lib import status
-from swarm_lib.claims import Task, complete, enqueue, try_claim
+from swarm_lib import orphan, status
+from swarm_lib.claims import CrossFilesystemError, Task, complete, enqueue, try_claim
+from swarm_lib.orphan import ReapedClaim, ReapResult
 from swarm_lib.status import Checkpoint, Status
 
 __all__ = [
@@ -20,6 +21,10 @@ __all__ = [
     "Task",
     "Status",
     "Checkpoint",
+    "CrossFilesystemError",
+    "ReapedClaim",
+    "ReapResult",
     "status",
+    "orphan",
 ]
-__version__ = "0.1.0.dev0"
+__version__ = "0.2.0.dev0"

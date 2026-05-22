@@ -6,12 +6,14 @@ in one place so ``claims`` and ``status`` don't duplicate it.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 def atomic_write_json(path: Path, data: Any) -> None:
@@ -50,3 +52,33 @@ def read_json(path: Path) -> Any:
 def now_iso() -> str:
     """Current UTC time as RFC3339-ish string with trailing 'Z'."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+@contextlib.contextmanager
+def status_lock(run_dir: Path) -> Iterator[None]:
+    """Advisory exclusive lock for status.json read-modify-write sequences.
+
+    Without this, two workers concurrently calling :func:`status.append_completed`
+    race: both read the same ``completed_tasks`` list, both append their own
+    task_id, and the second write clobbers the first — silent lost updates.
+
+    Wrapping read-then-write inside ``with status_lock(run_dir): ...`` serializes
+    concurrent callers using ``fcntl.flock`` on a sidecar ``.status.lock`` file.
+    The lock is advisory (only honored by code that asks for it), but every
+    status writer in the lib goes through this helper.
+
+    POSIX-only by design — swarm-lib is already POSIX-bound (Maildir physics,
+    os.replace atomicity).
+    """
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = run_dir / ".status.lock"
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
