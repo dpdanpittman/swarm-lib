@@ -2,7 +2,7 @@
 
 > Filesystem-as-orchestrator for agentic workflows. The Yield Rule, made operational.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3+-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Status: v0.2 alpha](https://img.shields.io/badge/status-v0.2_alpha-orange.svg)](#status--roadmap)
 
@@ -508,6 +508,6 @@ Hierarchical Model Dispatch: cheap-tier classifier decides routine-vs-complex an
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+[GNU AGPLv3 or later](LICENSE). Open-source, copyleft for network use — anyone running this as a service must publish their modifications under the same license. Code released under MIT in the v0.2.0 tagged release stays MIT for that tag; all `main` development from this commit forward is AGPLv3.
 
 Built as part of the broader agentic infrastructure work at [mabus.ai](https://mabus.ai).

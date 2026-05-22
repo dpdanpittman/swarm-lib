@@ -7,13 +7,13 @@ name = "swarm-lib"
 version = "0.2.0"
 description = "Filesystem-as-orchestrator for agentic workflows. Atomic-rename queueing + status.json checkpointing."
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "Dan Pittman" }]
 requires-python = ">=3.11"
 keywords = ["agents", "llm", "queue", "orchestration", "maildir", "claude", "ollama"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
