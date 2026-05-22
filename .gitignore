@@ -20,6 +20,7 @@ node_modules/
 site/dist/
 site/.astro/
 site/.cache/
+site/package-lock.json
 
 # Editor / OS
 .DS_Store
