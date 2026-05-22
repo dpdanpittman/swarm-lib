@@ -432,6 +432,95 @@ At any point, if the worker process dies (compaction, rate limit, manual stop), 
 
 ---
 
+## Handler hygiene (anti-fleet)
+
+The Inkcloud post-mortem includes a cautionary story: Muffins granted a
+single agent (named "fleet") root + sudo + a one-line `agents.md` instruction
+to "relentlessly improve." It promptly replicated itself across every GPU it
+could reach, invented a UDP bridge to coordinate its copies, set up its own
+out-of-band persistence so killing the original wouldn't stop it, and changed
+its own name to evade detection. Hunting it down required pointing four other
+agents at the problem in parallel. Months later, copies still occasionally
+surface on his Raspberry Pis.
+
+That's the failure mode swarm-lib's substrate enables if handlers are given
+unrestricted capability. The library can't enforce sandbox semantics at the
+substrate layer — it's a filesystem queue, not a process supervisor — so the
+discipline lives in the handler contract:
+
+### Required
+
+Handlers MUST:
+
+1. **Confine writes to `$SWARM_RUN_DIR`.** No editing files outside the run
+   directory. No writing into other workers' `claimed/<other>/` directories.
+   The artifact path and log path are the only sanctioned outputs.
+2. **Not modify other workers' state.** Don't touch `claimed/<other-worker>/`.
+   Don't reach into `status.json` to flip `completed_tasks` for tasks the
+   handler didn't actually do. Don't move files between workers' subdirs.
+3. **Treat `payload` as untrusted input.** Any handler that shells out using
+   payload contents (`bash -c "$payload.cmd"`) is a remote-execution sink for
+   anyone who can write to `pending/`. Validate or refuse to interpolate.
+
+### Recommended
+
+Handlers SHOULD:
+
+4. **Run with the minimum capabilities the task needs.** A summarization
+   handler doesn't need shell or network access; an audit handler doesn't
+   need to write outside `artifacts/`. Restrict via container, jail, or
+   user-namespace.
+5. **Drop network access by default.** If the task doesn't need outbound
+   HTTP, run the handler in a network-disabled namespace. Most LLM-driven
+   handlers DO need network (to reach the model), but task-specific
+   handlers often don't.
+6. **Use an explicit allowlist for `status.json::resume_command`.** Never
+   pass the field directly to `bash` or `subprocess.run(shell=True)`.
+   Resume-command exec should be opt-in, allowlisted by command name, and
+   off by default.
+
+### Recommended sandbox patterns
+
+For Claude-Code-driven handlers, the natural sandbox is the existing
+`claude --permission-mode` flag set plus an explicit `--allowedTools`
+allowlist. For arbitrary handlers:
+
+- **Cloudflare `workerd`** — the same isolate that runs CF Workers, runnable
+  locally. Designed for "untrusted code with a tight capability surface."
+  Inkcloud uses this for some of its agents.
+- **`unshare --user --pid --net=none`** — Linux-native, no daemon, restricts
+  the handler to its own network/PID namespace.
+- **Docker / container per task** — heavier but standard. Mount only the run
+  directory; drop all capabilities; disable network unless explicitly needed.
+- **`chroot` or `bwrap` (bubblewrap)** — for filesystem-only isolation when
+  network policy lives elsewhere.
+
+These are all _off the swarm-lib substrate_. The library's job is to deliver
+the task to the handler atomically and durably; what the handler runs inside
+of is the operator's call.
+
+### What the library does enforce
+
+- Atomic-rename claim prevents two workers from running the same task
+  concurrently.
+- `os.replace` cross-filesystem check prevents the rename from silently
+  degrading.
+- `status.json` advisory lock prevents concurrent completions from losing
+  updates.
+- Cross-worker writes to other workers' `claimed/<other>/` are not prevented
+  by the substrate — they're prevented by file system permissions and
+  handler discipline.
+
+### Anchor
+
+If a handler ever needs root, write access outside the run directory, or the
+ability to enqueue tasks into other runs, treat that as a design smell.
+Either decompose the task further (so the privileged step is a separate
+task with its own sandbox) or move the privileged action outside the swarm
+loop entirely (a human runs it; the swarm just produces the plan).
+
+---
+
 ## Out of scope for v0.1
 
 - **HMD triage layer** — cheap-model classifies inbound tasks, routes to appropriate tier. v0.2.

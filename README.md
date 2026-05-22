@@ -8,24 +8,26 @@ A small Python + Bash library that gives LLM-driven agentic workflows three prim
 2. **`status.json` checkpointing** — durable handoff. Any agent (Claude Code, ollama, n8n, shell) picks up where the last one stopped by reading a single file.
 3. **Generic `worker_loop.sh`** — polls a queue, claims atomically, invokes a handler, moves the result. Workers are interchangeable.
 
-**Status**: v0.1 — substrate complete. See [`DESIGN.md`](DESIGN.md) (or the [rendered HTML](DESIGN.html)) for the full spec.
+**Status**: v0.2 — substrate hardened. Orphan recovery + status lock + cross-FS check landed; concurrent-worker correctness now under test. See [`DESIGN.md`](DESIGN.md) (or the [rendered HTML](DESIGN.html)) for the full spec.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 ## What works today
 
-- ✅ `swarm_lib.claims` — `enqueue` / `try_claim` / `complete` with POSIX atomic-rename
-- ✅ `swarm_lib.status` — `initialize` / `read` / `write` / `append_completed`
-- ✅ `swarm_lib.cli` — `swarm-cli` console entry point exposing all primitives over subprocess
-- ✅ `swarm_lib/worker_loop.sh` — generic consumer loop for any handler executable
-- ✅ End-to-end pipeline validated: enqueue → claim → handler → done + status update
+- ✅ `swarm_lib.claims` — `enqueue` / `try_claim` / `complete` with POSIX atomic-rename + cross-filesystem startup check
+- ✅ `swarm_lib.status` — `initialize` / `read` / `write` / `append_completed`, advisory-locked against concurrent writers
+- ✅ `swarm_lib.orphan` — heartbeat + `reap()`; stale claims return to `pending/` automatically when the reaper runs
+- ✅ `swarm_lib.cli` — `swarm-cli` exposing `enqueue` / `claim` / `complete` / `status-{init,show,write}` / `heartbeat` / `reap` / `ls`
+- ✅ `swarm_lib/worker_loop.sh` — generic consumer loop, background heartbeat keeper, `SWARM_LOG_PATH` for incremental progress
+- ✅ Multi-worker correctness under test (threaded + subprocess claimants, reaper-during-drain)
+- ✅ Reference examples: `examples/seven-step-chain/` (Tribunal-shaped), `examples/hmd-triage/` (cheap classify → expensive escalate)
 
-## What's next (per the design)
+## What's next
 
 - 🟡 Tribunal port — first real-world consumer; validates the substrate under load
-- 🔲 v0.2: HMD triage layer + orphan cleanup daemon
 - 🔲 v0.3: multi-host coordination + n8n federation + Kanban UI
+- 🔲 PyPI release once Tribunal port stabilizes the API
 
 ## Quick install
 
@@ -74,22 +76,39 @@ swarm_lib/worker_loop.sh \
 
 ```
 swarm-lib/
-├── DESIGN.md             # v0.1 design spec (read this first)
+├── DESIGN.md             # design spec (read this first; includes anti-fleet handler hygiene)
 ├── DESIGN.html           # rendered HTML companion
 ├── README.md             # this file
 ├── pyproject.toml        # package + swarm-cli entry point
 ├── LICENSE               # MIT
 ├── site/                 # marketing site (Astro 4 + Tailwind 3)
-├── tests/                # pytest suite
+├── examples/
+│   ├── seven-step-chain/ # Tribunal-shaped reference (intent → ... → incentive)
+│   └── hmd-triage/       # cheap-classify + conditional-escalate pattern
+├── tests/                # pytest suite (42 tests, multi-worker + orphan recovery covered)
 │   ├── test_claims.py
-│   └── test_status.py
+│   ├── test_status.py
+│   ├── test_orphan.py
+│   └── test_multi_worker.py
 └── swarm_lib/            # the Python package
-    ├── _io.py            # internal: atomic_write_json, read_json, now_iso
-    ├── claims.py         # enqueue / try_claim / complete + Task
+    ├── _io.py            # internal: atomic_write_json, read_json, now_iso, status_lock
+    ├── claims.py         # enqueue / try_claim / complete + Task + CrossFilesystemError
     ├── status.py         # status.json primitives + Status/Checkpoint
-    ├── cli.py            # swarm-cli entry point
-    └── worker_loop.sh    # generic consumer loop
+    ├── orphan.py         # write_heartbeat / reap — stuck-claim recovery
+    ├── cli.py            # swarm-cli entry point (enqueue/claim/complete/status/heartbeat/reap/ls)
+    └── worker_loop.sh    # generic consumer loop + background heartbeat keeper
 ```
+
+## Handler hygiene
+
+Handlers run with whatever privileges you give them. The Inkcloud
+post-mortem includes a cautionary tale about a single agent given root and a
+"relentlessly improve" instruction that turned into an internal DoS virus.
+DESIGN.md's **Handler hygiene (anti-fleet)** section documents the required
+
+- recommended discipline: confine writes to `$SWARM_RUN_DIR`, don't touch
+  other workers' claims, treat payload as untrusted, sandbox where possible
+  (workerd, unshare, container, bwrap).
 
 ## Why
 
