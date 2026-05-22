@@ -1,0 +1,130 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Production deployment" description="What a real swarm-lib deployment looks like: systemd worker units, cron-driven reaper, multi-worker scaling, observability without a UI.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// DOCS / PRODUCTION</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">Production deployment</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        systemd for workers. cron for the reaper. The filesystem for everything else.
+      </p>
+    </section>
+
+    <section id="systemd-worker" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Worker as a systemd user service</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        A templated user service so you can run one unit per run-dir. <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">%i</code> in the unit file is the instance name passed at start time.
+      </p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-4"><code><span class="text-muted"># ~/.config/systemd/user/swarm-worker@.service</span>
+[Unit]
+Description=swarm-lib worker for ~/.swarm/%i
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/src/swarm-lib/swarm_lib/worker_loop.sh \
+  --run-dir %h/.swarm/%i \
+  --worker-id w.%H.%i \
+  --handler %h/.swarm/handlers/dispatcher.sh \
+  --heartbeat-interval 30 \
+  --poll-interval 5
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target</code></pre>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># Start it</span>
+systemctl --user enable swarm-worker@audit-r3x2.service
+systemctl --user start swarm-worker@audit-r3x2.service
+
+<span class="text-muted"># Watch it</span>
+journalctl --user -fu swarm-worker@audit-r3x2.service</code></pre>
+    </section>
+
+    <section id="reaper" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Cron-driven reaper</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        Every 5 minutes, sweep every run-dir under <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">~/.swarm/</code> and return stale claims to <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">pending/</code>.
+      </p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-4"><code><span class="text-muted"># /etc/cron.d/swarm-reap</span>
+*/5 * * * * dan for d in $&#123;HOME&#125;/.swarm/*/; do \
+  swarm-cli reap --run-dir <span class="text-warm">"$d"</span> --stale-after 300; \
+done</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">--stale-after 300</code> matches a worker that fell off the network or got killed in the last 5 minutes. Tune this up if your handlers can legitimately run that long without writing a heartbeat (the heartbeat keeper writes every <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">--heartbeat-interval</code> seconds while the worker is alive).
+      </p>
+    </section>
+
+    <section id="scaling" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Scaling: multiple workers on one queue</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        Just start more workers against the same run-dir with different worker_ids. The atomic-rename guarantees no double-claims.
+      </p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-4"><code>swarm_lib/worker_loop.sh --run-dir ~/.swarm/big --worker-id w.1 --handler ./h.sh &amp;
+swarm_lib/worker_loop.sh --run-dir ~/.swarm/big --worker-id w.2 --handler ./h.sh &amp;
+swarm_lib/worker_loop.sh --run-dir ~/.swarm/big --worker-id w.3 --handler ./h.sh &amp;</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Each worker races for tasks. Multi-worker correctness is proven by the test suite under contention (threaded + subprocess claimants + reaper-during-drain). For larger fleets, run each as its own systemd template instance with a worker-id derived from the instance name.
+      </p>
+    </section>
+
+    <section id="task-filtering" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Task filtering: lane separation</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        Different tasks can be different shapes of work. Pass <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">--task-type-filter</code> to restrict a worker to specific lanes.
+      </p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-4"><code><span class="text-muted"># A cheap local worker only handles classify tasks</span>
+worker_loop.sh --run-dir ~/.swarm/run --worker-id w.local --handler ./local.sh \
+  --task-type-filter classify
+
+<span class="text-muted"># An expensive-tier worker handles escalations</span>
+worker_loop.sh --run-dir ~/.swarm/run --worker-id w.opus --handler ./opus.sh \
+  --task-type-filter escalate,verify</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Combine with model-tier hints to wire HMD-style cost routing. See <a href="/examples/hmd-triage" class="text-accent no-underline hover:underline">/examples/hmd-triage</a>.
+      </p>
+    </section>
+
+    <section id="observability" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Observability without a UI</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        The substrate gives you observability without a separate UI service. Everything is on disk; everything is greppable.
+      </p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># Counts + next step + last completed task + in-flight workers</span>
+swarm-cli ls --run-dir ~/.swarm/audit-r3x2
+
+<span class="text-muted"># All runs at once</span>
+swarm-cli ls
+
+<span class="text-muted"># Machine-readable for piping into other tools</span>
+swarm-cli ls --run-dir ~/.swarm/audit-r3x2 --json | jq '.[0].pending'
+
+<span class="text-muted"># Raw status.json</span>
+swarm-cli status-show --run-dir ~/.swarm/audit-r3x2
+
+<span class="text-muted"># Tail a long-running task's progress</span>
+tail -f ~/.swarm/audit-r3x2/artifacts/t.implement.log
+
+<span class="text-muted"># Failed tasks in the last hour</span>
+find ~/.swarm/audit-r3x2/failed/ -mmin -60
+
+<span class="text-muted"># Worker liveness</span>
+systemctl --user status swarm-worker@*.service</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl mt-4">
+        If you need a richer view, the JSON outputs feed cleanly into Grafana, a custom dashboard, or just <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">jq</code> one-liners.
+      </p>
+    </section>
+
+    <section id="backups" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Backups</h2>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Run directories are just directories. Any standard backup tool works — <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">rsync</code>, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">restic</code>, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">borg</code>, snapshots on the underlying filesystem. The state is the directory; back up the directory.
+      </p>
+    </section>
+
+  </div>
+
+</Base>

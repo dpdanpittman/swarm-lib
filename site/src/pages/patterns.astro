@@ -1,0 +1,177 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="Day-to-day patterns" description="Five concrete patterns showing how swarm-lib changes everyday agentic work: long-running async, compaction insurance, scheduled work, interactive claim, and cross-tool federation.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <!-- HEADER -->
+    <section class="mb-16">
+      <p class="text-sm text-accent-green mb-3 font-mono">// PATTERNS · how you'd actually use it</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">Day-to-day patterns</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        Five shapes of agentic work where swarm-lib saves real time, tokens, or sanity.
+      </p>
+      <p class="text-base text-muted leading-relaxed max-w-2xl">
+        None of these require a complicated setup. A worker loop running on your machine (or a server you already have) is enough to make each one real. The substrate is the same; the patterns differ in <span class="text-text">how you decompose</span> and <span class="text-text">when you walk away</span>.
+      </p>
+    </section>
+
+    <!-- PATTERN 1: LONG-RUNNING ASYNC -->
+    <section id="long-running" class="mb-20 scroll-mt-20">
+      <p class="text-sm text-muted font-mono mb-2">PATTERN 1</p>
+      <h2 class="text-3xl font-bold mb-3 text-warm">Long-running async — the killer app</h2>
+      <p class="text-muted leading-relaxed mb-4">
+        You ask an agent to audit 16 repositories for a standard. Normally you'd run this as one long Claude session: 16 sequential audits in a single context window, fighting compaction the whole way, holding the expensive context open while individual audits churn.
+      </p>
+      <p class="text-muted leading-relaxed mb-4">
+        With swarm-lib, the planner decomposes the request into 16 audit tasks (plus one synthesize task with <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">depends_on</code> set to all 16) and <span class="text-text">exits immediately</span>. A worker loop picks each one up in a fresh context window. You walk away. You come back later, run <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">swarm-cli ls</code>, see <span class="text-accent-green">14 done</span> and <span class="text-warm">2 failed</span>. Read the artifacts. Decide what to retry.
+      </p>
+
+      <div class="bg-panel border-l-2 border-accent-green p-5 rounded-r mb-4">
+        <p class="text-sm text-muted font-mono mb-2">SCENARIO</p>
+        <ul class="text-sm text-muted space-y-2">
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Goal:</span> audit a batch of repos against a single standard, surface findings, summarize.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Tasks:</span> 16 × <code class="text-xs">audit</code> (no deps, parallel) + 1 × <code class="text-xs">synthesize</code> (depends_on all 16).</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Tiers:</span> audit on cheap; synthesize on expensive.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Wall-clock:</span> one worker chews serially in fresh contexts; three workers race in parallel.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Cost shape:</span> 16 small, focused contexts beats one 16x-bloated window — even with retries.</span></li>
+        </ul>
+      </div>
+
+      <p class="text-muted leading-relaxed">
+        What used to be a multi-day marathon where compaction kept eating your progress becomes a 12-hour run you didn't have to babysit. The decomposition is the discipline; swarm-lib is just the substrate that makes it possible.
+      </p>
+    </section>
+
+    <!-- PATTERN 2: COMPACTION INSURANCE -->
+    <section id="compaction-insurance" class="mb-20 scroll-mt-20">
+      <p class="text-sm text-muted font-mono mb-2">PATTERN 2</p>
+      <h2 class="text-3xl font-bold mb-3 text-warm">Compaction insurance for any multi-step task</h2>
+      <p class="text-muted leading-relaxed mb-4">
+        You don't have to be running a 16-task audit to benefit from swarm-lib. Even when you're doing a single multi-step task interactively, you can write <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json</code> as you go. Compaction happens; the next session reads <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json</code>, sees <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">next_step</code> and <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">next_task_id</code>, and picks up exactly where you left off.
+      </p>
+      <p class="text-muted leading-relaxed mb-4">
+        Combined with an identity-persistence layer (a portrait file the next session reads to remember <span class="text-text">who it is</span> and <span class="text-text">how it works</span>), compaction stops being a discontinuity at all. The agent says "I am still me; I was doing X; here's the next step." It just resumes.
+      </p>
+
+      <div class="bg-panel border-l-2 border-accent-green p-5 rounded-r mb-4">
+        <p class="text-sm text-muted font-mono mb-2">SCENARIO</p>
+        <ul class="text-sm text-muted space-y-2">
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Goal:</span> survive context compaction without losing the thread of work.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Mechanism:</span> after each meaningful step, call <code class="text-xs">swarm-cli status-write</code> with a current summary + next_task_id.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Resume:</span> on a fresh session, the agent reads <code class="text-xs">status.json</code> before doing anything else.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">UX cost:</span> none — the chat surface looks the same. The substrate just won't lose state under it.</span></li>
+        </ul>
+      </div>
+
+      <p class="text-muted leading-relaxed">
+        This is the lowest-friction adoption path. You don't have to commit to a worker-loop deployment, you don't have to decompose anything. You just stop relying on chat history to remember where you were.
+      </p>
+    </section>
+
+    <!-- PATTERN 3: SCHEDULED WORK -->
+    <section id="scheduled" class="mb-20 scroll-mt-20">
+      <p class="text-sm text-muted font-mono mb-2">PATTERN 3</p>
+      <h2 class="text-3xl font-bold mb-3 text-warm">Scheduled work that survives restarts</h2>
+      <p class="text-muted leading-relaxed mb-4">
+        You have recurring jobs: a daily digest email, a weekly content pipeline, a periodic analytics report, a research-summary-on-demand workflow. Today these probably run as bespoke scripts triggered by cron or a workflow engine. When one step in the middle fails, you usually find out the next morning and re-run the whole thing by hand.
+      </p>
+      <p class="text-muted leading-relaxed mb-4">
+        With swarm-lib, the cron job just enqueues a task. The worker handles it, writes the artifact, updates <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json</code>. If step three fails, it lands in <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">failed/</code> with the full payload preserved. Tomorrow's run is unaffected. You get retry, durable state, and artifact storage <span class="text-text">for free</span>, without writing any plumbing.
+      </p>
+
+      <div class="bg-panel border-l-2 border-accent-green p-5 rounded-r mb-4">
+        <p class="text-sm text-muted font-mono mb-2">SCENARIO</p>
+        <ul class="text-sm text-muted space-y-2">
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Goal:</span> a daily multi-step pipeline (e.g. research → draft → edit → publish) that doesn't fall over silently.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Trigger:</span> cron or a systemd timer enqueues the first task each morning.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Chain:</span> each handler enqueues the next step with <code class="text-xs">depends_on</code> set to itself.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Failure:</span> a single failed step is quarantined in <code class="text-xs">failed/</code>; the rest of tomorrow is unaffected.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Observability:</span> <code class="text-xs">swarm-cli ls</code> on the run directory + <code class="text-xs">tail -f artifacts/&lt;task&gt;.log</code> for live progress.</span></li>
+        </ul>
+      </div>
+
+      <p class="text-muted leading-relaxed">
+        The easiest first port is the smallest pipeline you have running today. Move its body into a swarm handler, replace the cron-triggers-a-script line with cron-enqueues-a-task, watch it run for a week. Then port the next one.
+      </p>
+    </section>
+
+    <!-- PATTERN 4: I AM THE WORKER -->
+    <section id="i-am-worker" class="mb-20 scroll-mt-20">
+      <p class="text-sm text-muted font-mono mb-2">PATTERN 4</p>
+      <h2 class="text-3xl font-bold mb-3 text-warm">"I am the worker"</h2>
+      <p class="text-muted leading-relaxed mb-4">
+        Sometimes the right worker for a task is <span class="text-text">you</span>, in your current session — not a background loop. A swarm-lib task can be claimed interactively: <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">swarm-cli claim --run &lt;id&gt;</code> outputs the task JSON, the suggested next step, and the artifact path. You do the work in your live session and call <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">swarm-cli complete</code> when done.
+      </p>
+      <p class="text-muted leading-relaxed mb-4">
+        This is useful when an agent produced a draft that needs review-and-refine. The agent enqueues a <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">human-review</code> task with the draft as its artifact. A worker loop with a filter <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">--task-type-filter human-review</code> never picks it up; only you do, manually, when you're ready. The substrate is just a queue — humans participate the same way bots do.
+      </p>
+
+      <div class="bg-panel border-l-2 border-accent-green p-5 rounded-r mb-4">
+        <p class="text-sm text-muted font-mono mb-2">SCENARIO</p>
+        <ul class="text-sm text-muted space-y-2">
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Goal:</span> mix automated work and human judgment in the same workflow.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Pattern:</span> bots claim <code class="text-xs">draft</code> tasks; humans claim <code class="text-xs">review</code> tasks; bots claim <code class="text-xs">finalize</code> after review completes.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Routing:</span> filtered worker loops only claim what's theirs, so human tasks wait for humans.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Result:</span> no special-cased "human-in-the-loop" framework — humans are just workers with a specific filter.</span></li>
+        </ul>
+      </div>
+
+      <p class="text-muted leading-relaxed">
+        The substrate doesn't know the difference between a Claude Code worker, a local model, an n8n flow, and a human at a terminal. All four can be participants in the same run.
+      </p>
+    </section>
+
+    <!-- PATTERN 5: CROSS-TOOL FEDERATION -->
+    <section id="federation" class="mb-20 scroll-mt-20">
+      <p class="text-sm text-muted font-mono mb-2">PATTERN 5</p>
+      <h2 class="text-3xl font-bold mb-3 text-warm">Cross-tool federation</h2>
+      <p class="text-muted leading-relaxed mb-4">
+        Most real workflows aren't run by a single tool. You have n8n flows that handle scheduling and webhooks. You have shell scripts that handle deploys. You have Claude Code or Codex for reasoning-heavy steps. You have ollama for cheap local inference. Today these tools each maintain their own state, their own retry semantics, their own logs. Coordinating across them means writing glue.
+      </p>
+      <p class="text-muted leading-relaxed mb-4">
+        With swarm-lib, every one of those tools reads and writes the same <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">~/.swarm/</code> substrate. An n8n flow enqueues a task. A Claude worker claims it, reasons about it, writes an artifact. Another n8n flow reads the artifact and posts it somewhere. Each tool stays in its lane; the filesystem is the contract between them.
+      </p>
+
+      <div class="bg-panel border-l-2 border-accent-green p-5 rounded-r mb-4">
+        <p class="text-sm text-muted font-mono mb-2">SCENARIO</p>
+        <ul class="text-sm text-muted space-y-2">
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Goal:</span> a multi-step pipeline where each step has a different best tool.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Layout:</span> n8n does triggering + I/O; Claude does adversarial review / planning; ollama does cheap classification; cron does scheduling.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Coordination:</span> none beyond the shared run directory. Each tool's handler is responsible for reading its inputs and writing its outputs in the canonical place.</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Failure handling:</span> shared — every tool that fails leaves its task in <code class="text-xs">failed/</code>, which any other tool (or human) can inspect.</span></li>
+        </ul>
+      </div>
+
+      <p class="text-muted leading-relaxed">
+        This is the long-tail value. Once the substrate is in place, every new tool you add to your stack joins the federation without you writing new integration code. The barrier to participation is "can it read and write files in a directory?" — which is to say, no barrier at all.
+      </p>
+    </section>
+
+    <!-- HMD HINT -->
+    <section class="mb-20">
+      <h2 class="text-2xl font-bold mb-4 text-accent">Bonus pattern: cost-routing via HMD</h2>
+      <p class="text-muted leading-relaxed mb-4">
+        Hierarchical Model Dispatch: a cheap-tier classifier decides whether a task is routine (resolve inline) or complex (escalate to an expensive tier). Most tasks resolve cheap; only the genuinely hard ones pay the expensive-tier price.
+      </p>
+      <p class="text-muted leading-relaxed">
+        See <a href="/examples/hmd-triage" class="text-accent no-underline hover:underline">/examples/hmd-triage</a> for the working reference, or jump straight to the source at <a href="https://github.com/dpdanpittman/swarm-lib/tree/main/examples/hmd-triage" class="text-accent no-underline hover:underline">github.com/dpdanpittman/swarm-lib/examples/hmd-triage</a>.
+      </p>
+    </section>
+
+    <!-- FINAL CTA -->
+    <section class="mb-16">
+      <div class="bg-panel rounded p-8 text-center">
+        <p class="text-2xl font-semibold mb-3 text-text">All five patterns share one substrate.</p>
+        <p class="text-muted mb-6 max-w-xl mx-auto">Install once, write a handler dispatcher, and every pattern becomes available. The substrate doesn't care which one you're using on any given run.</p>
+        <div class="flex flex-wrap gap-3 justify-center">
+          <a href="/docs/quickstart" class="bg-accent text-bg px-6 py-3 rounded font-semibold no-underline hover:opacity-90 transition">Install + 60-second tour</a>
+          <a href="/docs/production" class="border border-border px-6 py-3 rounded font-semibold text-text no-underline hover:bg-bg transition">Production deployment</a>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+</Base>

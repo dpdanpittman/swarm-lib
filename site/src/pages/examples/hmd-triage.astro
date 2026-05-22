@@ -1,0 +1,93 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="HMD triage" description="Hierarchical Model Dispatch: a cheap-tier classifier decides whether a task is routine or complex, and conditionally escalates to an expensive tier. Cost routing made by the cheap model, not the producer.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// EXAMPLES / HMD TRIAGE</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">HMD triage</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        Hierarchical Model Dispatch. Cheap classify, conditional escalate.
+      </p>
+      <p class="text-base text-muted leading-relaxed max-w-2xl">
+        90% of inbound work is routine. The other 10% is genuinely hard. HMD spends cheap tokens on the 90% and only escalates to the expensive tier when the cheap model itself decides it needs help.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">The flow</h2>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-4"><code>           ┌──────────────────────────────┐
+producer → │  t.classify  (cheap tier)    │
+           │   reads input, decides:      │
+           │   "routine" or "complex"     │
+           └──────────────┬───────────────┘
+                          │
+                routine? ─┴─ no  ──→  enqueue t.escalate
+                       │                 (expensive tier)
+                      yes                      │
+                       │                       ▼
+                       ▼              t.escalate runs,
+                resolved inline:      writes final
+                cheap-tier writes     answer
+                final answer</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        A single user-visible task (<code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">t.classify</code>) becomes a one-step chain on easy work or a two-step chain on hard work. The cost-routing decision is made by the cheap model, not by the producer.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">What this demonstrates</h2>
+      <ul class="text-muted space-y-3 max-w-2xl">
+        <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">A task that decides its own continuation.</span> The classify handler reads the payload and writes either a final artifact OR a new pending task. swarm-lib doesn't care which.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Tier hints as a contract, not a constraint.</span> Each task carries <code class="bg-code-bg border border-code-border px-1 py-0.5 rounded text-xs">tier_hint</code>; the handler reads it to decide which model to invoke.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Filtered workers</span> for lane separation: a cheap-only worker uses <code class="bg-code-bg border border-code-border px-1 py-0.5 rounded text-xs">--task-type-filter classify</code>; an expensive-only worker uses <code class="bg-code-bg border border-code-border px-1 py-0.5 rounded text-xs">--task-type-filter escalate</code>.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Cost shape:</span> if the cheap classifier is well-calibrated, 90%+ of work resolves in <code class="bg-code-bg border border-code-border px-1 py-0.5 rounded text-xs">t.classify</code> alone.</span></li>
+      </ul>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Wiring a real LLM</h2>
+      <p class="text-muted leading-relaxed mb-3 max-w-2xl">The classify handler ships as a stub that decides by input length. Replace with a real cheap-tier model call:</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-6"><code><span class="text-muted"># In classify.sh, swap the STUB heuristic for:</span>
+VERDICT=$(claude -p --model haiku --output-file - &lt;&lt;EOF
+You are a triage classifier. Decide if the following request can be
+handled by a fast/cheap model or needs an opus-tier model. Respond
+with 'routine' or 'complex' on the first line, then a one-line reason.
+
+Request: $USER_REQUEST
+EOF
+)</code></pre>
+      <p class="text-muted leading-relaxed mb-3 max-w-2xl">Similarly for the escalate handler:</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># In escalate.sh, swap the STUB for:</span>
+claude -p --model opus --output-file <span class="text-warm">"$SWARM_ARTIFACT_PATH"</span> &lt;&lt;EOF
+$USER_REQUEST
+(Pre-classified as complex: $CLASSIFIER_REASON. Reason hard.)
+EOF</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl mt-4">
+        You can swap <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">claude</code> for <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">ollama run</code> on either side. The cheap classifier is a great fit for a small local model since it just needs to make a routine/complex call.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">When HMD wins (and when it doesn't)</h2>
+      <ul class="text-muted space-y-3 max-w-2xl">
+        <li class="flex gap-3"><span class="text-accent-green shrink-0">✓</span><span>Long-tail complexity distribution AND high volume — cheap-tier savings compound.</span></li>
+        <li class="flex gap-3"><span class="text-accent-green shrink-0">✓</span><span>Code review, support triage, content moderation, content generation pipelines.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">✗</span><span>Uniformly hard or uniformly easy work — the classifier overhead doesn't pay for itself.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">✗</span><span>Low volume — cheap-tier latency win is negligible.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">✗</span><span>Escalation rate &gt; 50% — the classifier becomes the bottleneck.</span></li>
+      </ul>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Source</h2>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Full source: <a href="https://github.com/dpdanpittman/swarm-lib/tree/main/examples/hmd-triage" class="text-accent no-underline hover:underline">examples/hmd-triage/</a> in the repo. Includes <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">driver.sh</code>, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">dispatcher.sh</code> (routes by task_type), <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">classify.sh</code>, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">escalate.sh</code>, and a README.
+      </p>
+    </section>
+
+  </div>
+
+</Base>

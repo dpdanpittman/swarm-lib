@@ -1,0 +1,124 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Quickstart" description="Install swarm-lib, enqueue your first task, run a worker against it, check the result. Under a minute end-to-end.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// DOCS / QUICKSTART</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">Quickstart</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        Install, enqueue, run a worker, check the result. Under a minute end-to-end.
+      </p>
+      <p class="text-base text-muted leading-relaxed max-w-2xl">
+        Prereqs: Python 3.11+, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">jq</code> for the bash example, and a POSIX-y filesystem (Linux, macOS, WSL).
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Install</h2>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code>git clone https://github.com/dpdanpittman/swarm-lib
+cd swarm-lib
+pip install -e .
+<span class="text-muted"># 'swarm-cli' is now on PATH</span></code></pre>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">From the shell</h2>
+      <p class="text-muted mb-4 max-w-2xl">Enqueue a task, run a worker for one iteration, inspect the result.</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># 1. Initialize a run + enqueue a task</span>
+mkdir -p ~/.swarm/hello
+swarm-cli status-init --run-dir ~/.swarm/hello --run-id hello \
+  --summary <span class="text-warm">"Hello-world test run"</span> --next-task-id t.1
+
+swarm-cli enqueue --run-dir ~/.swarm/hello \
+  --task-id t.1 --task-type greet \
+  --payload <span class="text-warm">'&#123;"who": "world"&#125;'</span>
+
+<span class="text-muted"># 2. Write a handler (gets task JSON on stdin, writes to artifact path)</span>
+cat &gt; /tmp/handler.sh &lt;&lt;<span class="text-warm">'EOF'</span>
+#!/usr/bin/env bash
+set -euo pipefail
+TASK_JSON=$(cat)
+WHO=$(echo <span class="text-warm">"$TASK_JSON"</span> | jq -r '.payload.who')
+echo <span class="text-warm">"# Hello, $WHO"</span> &gt; <span class="text-warm">"$SWARM_ARTIFACT_PATH"</span>
+EOF
+chmod +x /tmp/handler.sh
+
+<span class="text-muted"># 3. Run a worker — one iteration, then exit</span>
+swarm_lib/worker_loop.sh \
+  --run-dir ~/.swarm/hello \
+  --worker-id w.demo \
+  --handler /tmp/handler.sh \
+  --max-iterations 1
+
+<span class="text-muted"># 4. Check what happened</span>
+swarm-cli ls --run-dir ~/.swarm/hello
+cat ~/.swarm/hello/artifacts/t.1.md</code></pre>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">From Python</h2>
+      <p class="text-muted mb-4 max-w-2xl">Same loop, no subprocess boundary. Useful when you want to enqueue tasks from inside another Python program (a webhook handler, a notebook, an LLM agent).</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-accent">from</span> swarm_lib <span class="text-accent">import</span> claims, status
+
+run_dir = <span class="text-warm">"~/.swarm/hello-py"</span>
+
+status.initialize(run_dir, run_id=<span class="text-warm">"hello-py"</span>)
+
+claims.enqueue(
+    run_dir,
+    task_id=<span class="text-warm">"t.1"</span>,
+    task_type=<span class="text-warm">"greet"</span>,
+    payload=&#123;<span class="text-warm">"who"</span>: <span class="text-warm">"world"</span>&#125;,
+)
+
+task = claims.try_claim(run_dir, worker_id=<span class="text-warm">"w.demo"</span>)
+<span class="text-accent">if</span> task <span class="text-accent">is not</span> <span class="text-accent-green">None</span>:
+    <span class="text-muted"># ... do work, write artifacts under run_dir/artifacts/ ...</span>
+    claims.complete(task, success=<span class="text-accent-green">True</span>)</code></pre>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Anatomy of a run directory</h2>
+      <p class="text-muted mb-4 max-w-2xl">Every swarm-lib run lives in its own directory. After the quickstart above, here's what you have on disk:</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code>~/.swarm/hello/
+├── status.json          <span class="text-muted"># the durable handoff state</span>
+├── pending/             <span class="text-muted"># tasks waiting to be claimed (empty after handler runs)</span>
+├── claimed/             <span class="text-muted"># tasks being worked on, namespaced by worker</span>
+│   └── w.demo/
+│       └── .heartbeat   <span class="text-muted"># mtime tracked by the reaper</span>
+├── done/                <span class="text-muted"># successfully completed tasks</span>
+│   └── t.1.json
+├── failed/              <span class="text-muted"># tasks that exited non-zero</span>
+└── artifacts/           <span class="text-muted"># task outputs</span>
+    ├── t.1.md           <span class="text-muted"># your handler's output</span>
+    └── t.1.log          <span class="text-muted"># tail-friendly log if your handler appended progress</span></code></pre>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Next steps</h2>
+      <div class="grid md:grid-cols-2 gap-4">
+        <a href="/docs/concepts" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-semibold text-warm mb-1">Concepts →</p>
+          <p class="text-sm text-muted leading-relaxed">How the substrate actually works: Yield Rule, claim protocol, orphan recovery, handler contracts.</p>
+        </a>
+        <a href="/docs/production" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-semibold text-warm mb-1">Production deployment →</p>
+          <p class="text-sm text-muted leading-relaxed">systemd workers, cron-driven reaper, multi-worker scaling, observability.</p>
+        </a>
+        <a href="/examples" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-semibold text-warm mb-1">Examples →</p>
+          <p class="text-sm text-muted leading-relaxed">Reference handlers you can copy: seven-step chain, HMD triage.</p>
+        </a>
+        <a href="/patterns" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-semibold text-warm mb-1">Day-to-day patterns →</p>
+          <p class="text-sm text-muted leading-relaxed">The five concrete shapes of work where swarm-lib pays for itself.</p>
+        </a>
+      </div>
+    </section>
+
+  </div>
+
+</Base>

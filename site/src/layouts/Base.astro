@@ -1,0 +1,37 @@
+---
+import '../styles/global.css';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const defaultDescription = "Filesystem-as-orchestrator for agentic workflows. The Yield Rule + atomic-rename queueing + status.json checkpointing. A small Python + Bash library that makes LLM-driven workflows survive compaction, crashes, rate limits, and process restarts.";
+
+const { title, description = defaultDescription } = Astro.props;
+const titleSuffix = title === "swarm-lib" ? "swarm-lib" : `${title} — swarm-lib`;
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{titleSuffix}</title>
+  <meta name="description" content={description} />
+  <meta name="theme-color" content="#0f1115" />
+  <meta property="og:title" content={titleSuffix} />
+  <meta property="og:description" content={description} />
+  <meta property="og:url" content="https://swarm.mabus.ai/" />
+  <meta property="og:type" content="website" />
+  <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site || "https://swarm.mabus.ai").toString()} />
+</head>
+<body class="bg-bg text-text min-h-screen flex flex-col">
+  <Nav />
+  <main class="flex-1">
+    <slot />
+  </main>
+  <Footer />
+</body>
+</html>

@@ -1,0 +1,75 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Docs" description="swarm-lib documentation — quickstart, concepts, production deployment, API reference, comparison vs other tools.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// DOCS</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">Documentation</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        Everything you need to use swarm-lib in real workflows.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-6 text-accent">Start here</h2>
+      <div class="space-y-3">
+        <a href="/docs/quickstart" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-mono text-muted mb-1">/docs/quickstart</p>
+          <p class="text-text font-semibold mb-1">Quickstart →</p>
+          <p class="text-sm text-muted leading-relaxed">Install, enqueue a task, run a worker, check the result. Shell + Python paths.</p>
+        </a>
+        <a href="/docs/concepts" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-mono text-muted mb-1">/docs/concepts</p>
+          <p class="text-text font-semibold mb-1">Concepts →</p>
+          <p class="text-sm text-muted leading-relaxed">The Yield Rule, file-system-as-orchestrator, claim protocol, orphan recovery, handler hygiene.</p>
+        </a>
+      </div>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-6 text-accent">Ship it</h2>
+      <div class="space-y-3">
+        <a href="/docs/production" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-mono text-muted mb-1">/docs/production</p>
+          <p class="text-text font-semibold mb-1">Production deployment →</p>
+          <p class="text-sm text-muted leading-relaxed">systemd worker units, cron-driven reaper, multi-worker scaling, observability without a UI.</p>
+        </a>
+        <a href="/docs/api" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-mono text-muted mb-1">/docs/api</p>
+          <p class="text-text font-semibold mb-1">API reference →</p>
+          <p class="text-sm text-muted leading-relaxed">Python module surface, <code class="text-xs">swarm-cli</code> subcommands, worker handler env vars.</p>
+        </a>
+      </div>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-6 text-accent">Decide</h2>
+      <div class="space-y-3">
+        <a href="/docs/comparison" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-mono text-muted mb-1">/docs/comparison</p>
+          <p class="text-text font-semibold mb-1">Why swarm-lib and not X →</p>
+          <p class="text-sm text-muted leading-relaxed">Honest comparison vs Celery / Airflow / Temporal / LangChain / CrewAI / GitHub Actions. Where each wins.</p>
+        </a>
+        <a href="/patterns" class="bg-panel rounded p-5 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-mono text-muted mb-1">/patterns</p>
+          <p class="text-text font-semibold mb-1">Day-to-day patterns →</p>
+          <p class="text-sm text-muted leading-relaxed">Five concrete shapes of work where swarm-lib saves you time, tokens, or sanity.</p>
+        </a>
+      </div>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-6 text-accent">Going deeper</h2>
+      <ul class="space-y-3 text-muted">
+        <li class="flex gap-3"><span class="text-warm">→</span> <a href="https://github.com/dpdanpittman/swarm-lib/blob/main/DESIGN.md" class="text-accent no-underline hover:underline">DESIGN.md</a> — the full v0.2 design spec, including evolution policy + risks + open questions</li>
+        <li class="flex gap-3"><span class="text-warm">→</span> <a href="/examples" class="text-accent no-underline hover:underline">/examples</a> — reference handlers you can copy</li>
+        <li class="flex gap-3"><span class="text-warm">→</span> <a href="https://github.com/dpdanpittman/swarm-lib/issues" class="text-accent no-underline hover:underline">GitHub Issues</a> — bug reports, feature requests, design discussion</li>
+      </ul>
+    </section>
+
+  </div>
+
+</Base>

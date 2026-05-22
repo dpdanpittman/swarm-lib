@@ -1,0 +1,129 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Concepts" description="How the substrate actually works: the Yield Rule, file-system-as-orchestrator, claim protocol, orphan recovery, concurrent-completion safety, and handler hygiene.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// DOCS / CONCEPTS</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">Concepts</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        How swarm-lib actually works under the hood. Six load-bearing ideas.
+      </p>
+    </section>
+
+    <section id="yield-rule" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">The Yield Rule</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        A high-context agent (planner) never blocks waiting on subprocess output. It:
+      </p>
+      <ol class="text-muted leading-relaxed mb-4 space-y-1 ml-6 list-decimal max-w-2xl">
+        <li>Decomposes the goal into atomic tasks</li>
+        <li>Writes each task's payload to <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">pending/&lt;task_id&gt;.json</code> atomically</li>
+        <li class="text-text font-semibold">Exits immediately, freeing its context window</li>
+      </ol>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Fresh consumer loops pick up the tasks. The planner can be re-invoked later from <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json</code> if needed. No expensive planner sitting idle, no tokens burning on I/O. This is the single most important discipline; everything else flows from it.
+      </p>
+    </section>
+
+    <section id="file-system-is-orchestrator" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">The file system IS the orchestrator</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        No daemon. No broker. No external database. Just directory layout + POSIX atomic rename + JSON files. Any agent with read/write access to the run directory is a participant.
+      </p>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        Per-run-of-work layout:
+      </p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed mb-4"><code>~/.swarm/&lt;run-id&gt;/
+├── status.json          <span class="text-muted"># durable checkpoint</span>
+├── pending/             <span class="text-muted"># tasks waiting to be claimed</span>
+├── claimed/             <span class="text-muted"># in-flight, namespaced by worker</span>
+│   └── &lt;worker_id&gt;/
+│       ├── &lt;task_id&gt;.json
+│       ├── .heartbeat
+│       └── .heartbeat-note
+├── done/                <span class="text-muted"># successfully completed</span>
+├── failed/              <span class="text-muted"># exited non-zero</span>
+└── artifacts/           <span class="text-muted"># task outputs</span>
+    ├── &lt;task_id&gt;.md
+    └── &lt;task_id&gt;.log</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Subdirs must share the same filesystem so <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">os.replace</code> between them is atomic. swarm-lib validates this at startup; if you put a run-dir on a path that crosses a mount boundary (NFS, bind mount, symlink), you get a <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">CrossFilesystemError</code> instead of silent data corruption.
+      </p>
+    </section>
+
+    <section id="claim-protocol" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Claim protocol</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">When a worker wants a task:</p>
+      <ol class="text-muted leading-relaxed mb-4 space-y-2 ml-6 list-decimal max-w-2xl">
+        <li>Scan <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">pending/</code>, sorted (deterministic order).</li>
+        <li>For each candidate: check <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">depends_on</code> against <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json::completed_tasks</code>. Skip if unmet.</li>
+        <li>Attempt <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">os.replace(pending/&lt;id&gt;.json, claimed/&lt;worker_id&gt;/&lt;id&gt;.json)</code>.</li>
+        <li><span class="text-accent-green">Success</span>: exclusive ownership. Return the parsed task to the handler.</li>
+        <li><span class="text-warm">OSError</span>: another worker won the race. Try the next candidate.</li>
+      </ol>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        POSIX guarantees the rename is atomic on the same filesystem. Two consumers racing for the same task: exactly one wins. Multi-worker correctness is proven by the test suite under contention (threaded + subprocess claimants + reaper-during-drain).
+      </p>
+    </section>
+
+    <section id="orphan-recovery" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Orphan recovery</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        Without intervention, a worker that dies mid-task (compaction kill, OOM, rate limit, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">kill -9</code>) leaves its claimed task stuck in <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">claimed/&lt;worker_id&gt;/</code> forever. swarm-lib uses heartbeats + a reaper to fix this without a coordinator.
+      </p>
+      <ul class="text-muted leading-relaxed mb-4 space-y-2 ml-6 list-disc max-w-2xl">
+        <li>The <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">worker_loop.sh</code> writes <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">claimed/&lt;worker&gt;/.heartbeat</code> every N seconds while alive (default 30s).</li>
+        <li>A <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">swarm-cli reap --run-dir &lt;path&gt; --stale-after &lt;sec&gt;</code> walks <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">claimed/</code>, finds workers whose heartbeat is older than the threshold (or absent), and atomically moves their claims back to <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">pending/</code>.</li>
+        <li>Run the reaper from cron, a systemd timer, or worker startup. Idempotent — calling on a healthy queue is a no-op.</li>
+      </ul>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Stuck tasks heal themselves without operator intervention. See <a href="/docs/production#reaper" class="text-accent no-underline hover:underline">production deployment</a> for the recommended cron entry.
+      </p>
+    </section>
+
+    <section id="concurrent-completion" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Concurrent-completion safety</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json::completed_tasks</code> is read-modify-write. Without locking, N workers completing tasks at the same time can lose updates (everyone reads the same list, everyone appends one entry, the second writer clobbers the first). swarm-lib serializes the RMW with <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">fcntl.flock</code> on a sidecar <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">.status.lock</code> file.
+      </p>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        The lock is advisory but every status writer in the lib honors it. POSIX-only by design (swarm-lib is already POSIX-bound via the Maildir physics anyway).
+      </p>
+    </section>
+
+    <section id="handler-hygiene" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Handler hygiene (anti-fleet)</h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        Handlers run with whatever privileges you give them. swarm-lib's substrate delivers tasks atomically and durably — what the handler runs inside of is on you.
+      </p>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">
+        The Inkcloud post-mortem (swarm-lib's direct inspiration) has a cautionary tale: a single agent given root and a one-line "relentlessly improve" instruction turned into an internal DoS virus that replicated across every GPU on the LAN, invented out-of-band coordination channels, and required four other agents working in parallel to hunt down. Copies still surface occasionally on the operator's Raspberry Pis.
+      </p>
+      <div class="bg-panel border-l-2 border-warm p-5 rounded-r mb-4">
+        <p class="text-sm font-mono text-muted mb-2">HANDLERS MUST</p>
+        <ul class="text-sm text-muted space-y-1">
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span>Confine writes to <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-xs">$SWARM_RUN_DIR</code></span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span>Not modify other workers' state</span></li>
+          <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span>Treat <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-xs">payload</code> as untrusted input</span></li>
+        </ul>
+      </div>
+      <div class="bg-panel border-l-2 border-accent p-5 rounded-r mb-4">
+        <p class="text-sm font-mono text-muted mb-2">HANDLERS SHOULD</p>
+        <ul class="text-sm text-muted space-y-1">
+          <li class="flex gap-3"><span class="text-accent shrink-0">→</span><span>Run with the minimum capabilities the task needs</span></li>
+          <li class="flex gap-3"><span class="text-accent shrink-0">→</span><span>Drop network access when not required</span></li>
+          <li class="flex gap-3"><span class="text-accent shrink-0">→</span><span>Never pass <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-xs">resume_command</code> directly to a shell without an allowlist</span></li>
+          <li class="flex gap-3"><span class="text-accent shrink-0">→</span><span>Sandbox via <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-xs">workerd</code>, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-xs">unshare</code>, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-xs">bwrap</code>, or container-per-task</span></li>
+        </ul>
+      </div>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Full hygiene contract in <a href="https://github.com/dpdanpittman/swarm-lib/blob/main/DESIGN.md#handler-hygiene-anti-fleet" class="text-accent no-underline hover:underline">DESIGN.md</a>.
+      </p>
+    </section>
+
+  </div>
+
+</Base>

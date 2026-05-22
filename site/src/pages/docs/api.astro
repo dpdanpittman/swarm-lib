@@ -1,0 +1,121 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="API reference" description="swarm-lib API surface: Python module functions, swarm-cli subcommands, worker_loop.sh handler environment variables.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// DOCS / API</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">API reference</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        Python module surface, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">swarm-cli</code> subcommands, worker handler env vars.
+      </p>
+    </section>
+
+    <section id="python" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Python</h2>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-accent">from</span> swarm_lib <span class="text-accent">import</span> (
+    <span class="text-muted"># Queue primitives (claims.py)</span>
+    enqueue, try_claim, complete, Task, CrossFilesystemError,
+
+    <span class="text-muted"># Checkpoint primitives (status.py)</span>
+    status,        <span class="text-muted"># module</span>
+    Status, Checkpoint,
+
+    <span class="text-muted"># Orphan recovery (orphan.py)</span>
+    orphan,        <span class="text-muted"># module</span>
+    ReapedClaim, ReapResult,
+)</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl mt-4 mb-3">Function signatures:</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># claims.py</span>
+<span class="text-accent">def</span> enqueue(run_dir, task_id, task_type, payload,
+            depends_on=<span class="text-accent-green">None</span>, tier_hint=<span class="text-accent-green">None</span>,
+            created_by=<span class="text-accent-green">None</span>, deadline=<span class="text-accent-green">None</span>): ...
+<span class="text-accent">def</span> try_claim(run_dir, worker_id, task_type_filter=<span class="text-accent-green">None</span>) -&gt; Task | <span class="text-accent-green">None</span>: ...
+<span class="text-accent">def</span> complete(task, success, artifact_path=<span class="text-accent-green">None</span>): ...
+
+<span class="text-muted"># status.py</span>
+<span class="text-accent">def</span> initialize(run_dir, run_id, summary=<span class="text-warm">""</span>, next_step=<span class="text-warm">""</span>,
+               next_task_id=<span class="text-accent-green">None</span>, metadata=<span class="text-accent-green">None</span>): ...
+<span class="text-accent">def</span> read(run_dir) -&gt; Status: ...
+<span class="text-accent">def</span> write(run_dir, summary, next_step, next_task_id=<span class="text-accent-green">None</span>,
+          risk=<span class="text-warm">""</span>, current_worker=<span class="text-accent-green">None</span>,
+          resume_command=<span class="text-accent-green">None</span>, metadata=<span class="text-accent-green">None</span>) -&gt; Status: ...
+<span class="text-accent">def</span> append_completed(run_dir, task_id) -&gt; Status: ...
+
+<span class="text-muted"># orphan.py</span>
+<span class="text-accent">def</span> write_heartbeat(run_dir, worker_id, note=<span class="text-warm">""</span>) -&gt; Path: ...
+<span class="text-accent">def</span> reap(run_dir, stale_after_seconds=<span class="text-accent-green">300</span>) -&gt; ReapResult: ...</code></pre>
+    </section>
+
+    <section id="cli" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent"><code class="bg-code-bg border border-code-border px-2 py-1 rounded text-accent">swarm-cli</code></h2>
+      <p class="text-muted mb-4 leading-relaxed max-w-2xl">All primitives exposed via subprocess so non-Python consumers (worker_loop.sh, n8n nodes, plain shell) can participate without importing the package.</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code>swarm-cli enqueue       <span class="text-muted"># add a task to a run's pending/ queue</span>
+swarm-cli claim         <span class="text-muted"># atomically claim the next pending task (JSON on stdout)</span>
+swarm-cli complete      <span class="text-muted"># mark a claimed task done or failed</span>
+swarm-cli status-init   <span class="text-muted"># create a fresh status.json</span>
+swarm-cli status-show   <span class="text-muted"># print status.json as JSON</span>
+swarm-cli status-write  <span class="text-muted"># update status.json (preserves completed_tasks)</span>
+swarm-cli heartbeat     <span class="text-muted"># touch this worker's .heartbeat (orphan-recovery contract)</span>
+swarm-cli reap          <span class="text-muted"># return stale claims to pending/</span>
+swarm-cli ls            <span class="text-muted"># human-readable summary (or ~/.swarm/* if --run-dir omitted)</span></code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl mt-4 mb-3">Each subcommand takes <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">--help</code>. Single-line JSON output is jq-friendly:</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># Get the current next_task_id</span>
+swarm-cli status-show --run-dir ~/.swarm/run | jq -r .checkpoint.next_task_id
+
+<span class="text-muted"># All pending tasks across all runs</span>
+swarm-cli ls --json | jq '[.[].pending] | add'</code></pre>
+    </section>
+
+    <section id="worker-loop" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent"><code class="bg-code-bg border border-code-border px-2 py-1 rounded text-accent">worker_loop.sh</code></h2>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code>swarm_lib/worker_loop.sh \
+  --run-dir &lt;path&gt; \
+  --worker-id &lt;id&gt; \
+  --handler &lt;executable&gt; \
+  [--task-type-filter type1,type2] \
+  [--poll-interval 5] \
+  [--max-iterations 0] \
+  [--heartbeat-interval 30]</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl mt-4 mb-3">Each task invocation, the handler is exec'd with the task JSON on stdin and these env vars set:</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code>SWARM_RUN_DIR        <span class="text-muted"># the run directory</span>
+SWARM_TASK_ID        <span class="text-muted"># the claimed task's id</span>
+SWARM_WORKER_ID      <span class="text-muted"># this worker's id</span>
+SWARM_ARTIFACT_PATH  <span class="text-muted"># suggested output path: run_dir/artifacts/&lt;task_id&gt;.md</span>
+SWARM_LOG_PATH       <span class="text-muted"># tail -f friendly: run_dir/artifacts/&lt;task_id&gt;.log</span></code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl mt-4">
+        Handler contract: exit 0 → task moves to <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">done/</code> and <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">completed_tasks</code> updates. Exit non-zero → task moves to <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">failed/</code>.
+      </p>
+    </section>
+
+    <section id="schema" class="mb-16 scroll-mt-20">
+      <h2 class="text-2xl font-bold mb-3 text-accent"><code class="bg-code-bg border border-code-border px-2 py-1 rounded text-accent">status.json</code> schema</h2>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code>&#123;
+  "schema_version": "0.1",
+  "run_id": "audit-r3x2",
+  "checkpoint": &#123;
+    "summary": "Completed plan; ready for implement stage",
+    "next_step": "Invoke implement skill with plan output as input",
+    "next_task_id": "t.audit-r3x2.implement",
+    "resume_command": null,
+    "risk": "",
+    "completed_tasks": ["t.audit-r3x2.intent", "t.audit-r3x2.plan"],
+    "current_worker": null,
+    "timestamp": "2026-05-21T18:45:11Z"
+  &#125;,
+  "metadata": &#123;
+    "created_by": "mabus",
+    "consumer": "tribunal",
+    "tier_hint": "opus"
+  &#125;
+&#125;</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl mt-4">
+        Full field reference (with notes on evolution policy) is in <a href="https://github.com/dpdanpittman/swarm-lib/blob/main/DESIGN.md#statusjson-schema" class="text-accent no-underline hover:underline">DESIGN.md</a>.
+      </p>
+    </section>
+
+  </div>
+
+</Base>

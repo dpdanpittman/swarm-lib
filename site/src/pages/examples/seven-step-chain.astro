@@ -1,0 +1,127 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Seven-step chain" description="A Tribunal-shaped sequential pipeline demonstrating the Yield Rule under a sequential chain: intent → plan → implement → review → verify → classify → incentive. Each step runs in a fresh context.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// EXAMPLES / SEVEN-STEP CHAIN</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">Seven-step chain</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        A reference pipeline running seven LLM-driven stages back-to-back, each in a fresh context window.
+      </p>
+      <p class="text-base text-muted leading-relaxed max-w-2xl">
+        <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">intent → plan → implement → review → verify → classify → incentive</code>. Modeled after a Tribunal-style review pipeline, but the pattern generalizes to any long linear chain where each stage's input is the previous stage's artifact.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">The shape</h2>
+      <p class="text-muted leading-relaxed mb-4 max-w-2xl">
+        Each step is a swarm-lib task. Each handler:
+      </p>
+      <ol class="text-muted leading-relaxed mb-4 space-y-2 ml-6 list-decimal max-w-2xl">
+        <li>Reads <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">$SWARM_RUN_DIR/BACKLOG.md</code> (the original user intent) and the previous step's artifact.</li>
+        <li>Invokes its assigned model tier with the right skill loaded.</li>
+        <li>Writes its artifact to <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">$SWARM_ARTIFACT_PATH</code>.</li>
+        <li>Enqueues the next step with <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">depends_on=[current_task_id]</code>.</li>
+        <li>Updates <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json::next_task_id</code>.</li>
+        <li>Exits cleanly.</li>
+      </ol>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        No orchestrator. The chain advances itself, one fresh-context step at a time.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Tier mapping</h2>
+      <p class="text-muted leading-relaxed mb-4 max-w-2xl">Per-step model choice via <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">tier_hint</code>:</p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-border">
+              <th class="text-left py-3 pr-4 font-semibold text-text">Step</th>
+              <th class="text-left py-3 pr-4 font-semibold text-text">Tier</th>
+              <th class="text-left py-3 font-semibold text-text">Why</th>
+            </tr>
+          </thead>
+          <tbody class="text-muted">
+            <tr class="border-b border-border align-top">
+              <td class="py-3 pr-4 text-warm font-mono">intent</td>
+              <td class="py-3 pr-4 text-accent-green">haiku</td>
+              <td class="py-3">Cheap. Just structures the user's input.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-3 pr-4 text-warm font-mono">plan</td>
+              <td class="py-3 pr-4 text-accent">opus</td>
+              <td class="py-3">Hardest reasoning step. Worth the expensive tier.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-3 pr-4 text-warm font-mono">implement</td>
+              <td class="py-3 pr-4 text-accent-green">sonnet</td>
+              <td class="py-3">Mechanical from plan. Sonnet handles it.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-3 pr-4 text-warm font-mono">review</td>
+              <td class="py-3 pr-4 text-accent">opus</td>
+              <td class="py-3">Adversarial probe quality matters here.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-3 pr-4 text-warm font-mono">verify</td>
+              <td class="py-3 pr-4 text-accent-green">sonnet</td>
+              <td class="py-3">Pattern matching.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-3 pr-4 text-warm font-mono">classify</td>
+              <td class="py-3 pr-4 text-accent-green">haiku</td>
+              <td class="py-3">Just categorization.</td>
+            </tr>
+            <tr class="align-top">
+              <td class="py-3 pr-4 text-warm font-mono">incentive</td>
+              <td class="py-3 pr-4 text-accent-green">sonnet</td>
+              <td class="py-3">Generative but bounded.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Wiring an LLM</h2>
+      <p class="text-muted leading-relaxed mb-4 max-w-2xl">The handler ships as a stub that writes a placeholder. Replace the marked block with a real model call.</p>
+      <pre class="bg-code-bg border border-code-border p-4 rounded text-sm overflow-x-auto leading-relaxed"><code><span class="text-muted"># In handler.sh, replace the STUB block with:</span>
+TIER=$(echo <span class="text-warm">"$TASK_JSON"</span> | jq -r .tier_hint)
+SKILL=$(echo <span class="text-warm">"$TASK_JSON"</span> | jq -r .payload.skill)
+claude -p --model <span class="text-warm">"$TIER"</span> --skill <span class="text-warm">"$SKILL"</span> \
+       --output-file <span class="text-warm">"$SWARM_ARTIFACT_PATH"</span> &lt;&lt;EOF
+$(cat <span class="text-warm">"$SWARM_RUN_DIR/BACKLOG.md"</span>)
+
+Previous artifact:
+$(cat <span class="text-warm">"$SWARM_RUN_DIR/artifacts/$PREV_TASK_ID.md"</span> 2&gt;/dev/null || true)
+EOF</code></pre>
+      <p class="text-muted leading-relaxed max-w-2xl mt-4">
+        You can swap <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">claude</code> for <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">ollama run</code> if you're routing to a local model. The handler contract is just "read stdin, write to artifact path."
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Compaction survival</h2>
+      <p class="text-muted leading-relaxed mb-4 max-w-2xl">
+        At any point, if the worker process dies (compaction, rate limit, manual stop), the next worker reads <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">status.json</code>, sees <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">next_task_id</code>, claims it from <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">pending/</code>, resumes. No conversation history needed.
+      </p>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        This is the whole point. A seven-step chain that used to need one giant context window now runs as seven small ones, each immune to the others' failures.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Source</h2>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Full source: <a href="https://github.com/dpdanpittman/swarm-lib/tree/main/examples/seven-step-chain" class="text-accent no-underline hover:underline">examples/seven-step-chain/</a> in the repo. Includes <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">driver.sh</code> (kicks off a run), <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">handler.sh</code> (the per-step handler), and a README walking through the flow.
+      </p>
+    </section>
+
+  </div>
+
+</Base>

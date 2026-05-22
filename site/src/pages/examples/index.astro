@@ -1,0 +1,56 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Examples" description="Reference handler implementations: a seven-step chain demonstrating the Yield Rule under a sequential pipeline, and an HMD triage pattern for cost-routing.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// EXAMPLES</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">Examples</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        Working reference handlers you can copy. Each one is a substrate-shaped pattern, not a finished product.
+      </p>
+      <p class="text-base text-muted leading-relaxed max-w-2xl">
+        Both examples ship as stubs — the LLM call is marked <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">STUB</code> in the handler. Swap in <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">claude -p</code>, <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">ollama run</code>, or whatever model interface you prefer to make them live.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <div class="space-y-4">
+
+        <a href="/examples/seven-step-chain" class="bg-panel rounded p-6 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-mono text-muted mb-1">/examples/seven-step-chain</p>
+          <h2 class="text-2xl font-semibold mb-2 text-warm">Seven-step chain</h2>
+          <p class="text-muted leading-relaxed mb-3">
+            A Tribunal-shaped sequential pipeline: <code class="text-xs">intent → plan → implement → review → verify → classify → incentive</code>. Each step runs in a fresh context, reads the previous step's artifact, writes its own, then enqueues the next step. Per-step tier hints route cheap vs expensive work appropriately.
+          </p>
+          <p class="text-sm text-muted">
+            <span class="text-warm">Demonstrates:</span> the Yield Rule under a sequential chain, self-chaining handlers, per-task <code class="text-xs">tier_hint</code> routing, <code class="text-xs">status.json</code> checkpoint across the chain.
+          </p>
+        </a>
+
+        <a href="/examples/hmd-triage" class="bg-panel rounded p-6 no-underline block hover:bg-panel-soft transition">
+          <p class="text-sm font-mono text-muted mb-1">/examples/hmd-triage</p>
+          <h2 class="text-2xl font-semibold mb-2 text-warm">HMD triage (cost-routing)</h2>
+          <p class="text-muted leading-relaxed mb-3">
+            Hierarchical Model Dispatch. A cheap-tier classifier decides whether the task is routine (resolve inline) or complex (escalate to an expensive tier). The cost-routing decision is made by the cheap model itself, not by the producer.
+          </p>
+          <p class="text-sm text-muted">
+            <span class="text-warm">Demonstrates:</span> a single task that decides its own continuation, optional escalation via <code class="text-xs">depends_on</code>, model-tier filtering on the worker side.
+          </p>
+        </a>
+
+      </div>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Source</h2>
+      <p class="text-muted leading-relaxed max-w-2xl">
+        Both examples live under <a href="https://github.com/dpdanpittman/swarm-lib/tree/main/examples" class="text-accent no-underline hover:underline">examples/</a> in the repo. Clone, copy whichever fits your use case, replace the <code class="bg-code-bg border border-code-border px-1.5 py-0.5 rounded text-sm">STUB</code> blocks with your model calls.
+      </p>
+    </section>
+
+  </div>
+
+</Base>

@@ -1,0 +1,95 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Why swarm-lib and not X" description="Honest comparison vs Celery, Airflow, Temporal, LangChain, CrewAI, GitHub Actions, and bare chat threads. Where each tool wins.">
+
+  <div class="max-w-4xl mx-auto px-6 py-16">
+
+    <section class="mb-12">
+      <p class="text-sm text-accent-green mb-3 font-mono">// DOCS / COMPARISON</p>
+      <h1 class="text-4xl font-bold mb-4 leading-tight">Why swarm-lib and not X</h1>
+      <p class="text-xl text-muted mb-6 leading-snug max-w-2xl">
+        Honest comparison with adjacent tools. Where each wins.
+      </p>
+      <p class="text-base text-muted leading-relaxed max-w-2xl">
+        swarm-lib is <span class="text-text">less</span> powerful than Celery, Temporal, or Airflow for traditional async work. It's <span class="text-text">more</span> powerful for LLM-driven agentic work specifically, because it's purpose-built around the constraints that matter: chat-history-immune, context-window-aware, model-tier routing, interchangeable workers across LLM tools.
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-border">
+              <th class="text-left py-3 pr-4 font-semibold text-text">Tool</th>
+              <th class="text-left py-3 pr-4 font-semibold text-text">Built for</th>
+              <th class="text-left py-3 font-semibold text-text">Where swarm-lib is better</th>
+            </tr>
+          </thead>
+          <tbody class="text-muted">
+            <tr class="border-b border-border align-top">
+              <td class="py-4 pr-4 text-warm font-mono">Celery / RQ / SQS</td>
+              <td class="py-4 pr-4">High-throughput async jobs in long-running web apps</td>
+              <td class="py-4">LLM workflows need durable state across restarts, not just task delivery. <code class="bg-code-bg border border-code-border px-1 py-0.5 rounded text-xs">status.json</code> survives the worker dying mid-task in a way Celery's transient state doesn't.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-4 pr-4 text-warm font-mono">Airflow / Prefect / Dagster</td>
+              <td class="py-4 pr-4">DAG-based data pipelines</td>
+              <td class="py-4">swarm-lib is ~1000 LoC and runs anywhere a filesystem exists. Airflow is a service with a database, a scheduler, and a UI. Different size class.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-4 pr-4 text-warm font-mono">Temporal</td>
+              <td class="py-4 pr-4">Durable workflow execution with versioning</td>
+              <td class="py-4">swarm-lib's primitives are 90% of what Temporal gives you, in a form you can read end-to-end in an afternoon, with no SDK lock-in. Temporal wins at production scale with rich observability.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-4 pr-4 text-warm font-mono">LangChain / LangGraph</td>
+              <td class="py-4 pr-4">Composing LLM calls into chains/graphs</td>
+              <td class="py-4">swarm-lib is one level below — it's the <span class="text-text">substrate</span> a LangGraph could be built on, not a competitor to it. The Yield Rule says don't keep the planner loaded; emit tasks and exit.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-4 pr-4 text-warm font-mono">CrewAI / AutoGen / agno</td>
+              <td class="py-4 pr-4">Multi-agent role-based frameworks</td>
+              <td class="py-4">These run agents in-process and treat conversation as state. swarm-lib externalizes state to disk so any process can be an agent. Lower-level + more durable.</td>
+            </tr>
+            <tr class="border-b border-border align-top">
+              <td class="py-4 pr-4 text-warm font-mono">GitHub Actions</td>
+              <td class="py-4 pr-4">CI/CD as YAML workflows</td>
+              <td class="py-4">The Yield Rule mirrors <code class="bg-code-bg border border-code-border px-1 py-0.5 rounded text-xs">workflow_call</code>. But GH Actions is locked to GitHub's runner pool. swarm-lib runs anywhere.</td>
+            </tr>
+            <tr class="align-top">
+              <td class="py-4 pr-4 text-warm font-mono">One chat thread</td>
+              <td class="py-4 pr-4">Interactive, single-thread agentic work</td>
+              <td class="py-4">When your work outgrows a single thread, you need durable handoff. swarm-lib is the upgrade path.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">When swarm-lib is the wrong tool</h2>
+      <ul class="text-muted space-y-3 max-w-2xl">
+        <li class="flex gap-3"><span class="text-muted shrink-0">→</span><span>Single-shot, sub-second requests — just call the model directly.</span></li>
+        <li class="flex gap-3"><span class="text-muted shrink-0">→</span><span>Stateful interactive REPL-style sessions where the model needs continuous tool access.</span></li>
+        <li class="flex gap-3"><span class="text-muted shrink-0">→</span><span>High-throughput non-LLM task queues — Celery, RQ, or SQS are built for that and have much richer scheduling primitives.</span></li>
+        <li class="flex gap-3"><span class="text-muted shrink-0">→</span><span>Cross-machine consistency without a shared filesystem. v0.3 will address NFS / shared-storage federation; v0.2 is single-host.</span></li>
+      </ul>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-2xl font-bold mb-3 text-accent">Composition, not replacement</h2>
+      <p class="text-muted leading-relaxed max-w-2xl mb-4">
+        swarm-lib doesn't try to be every layer of your stack. It's the durable substrate layer; everything else slots in via handlers.
+      </p>
+      <ul class="text-muted space-y-3 max-w-2xl">
+        <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Use Celery + swarm-lib</span> when you want Celery's scheduling but also durable LLM state.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Use LangGraph + swarm-lib</span> when you want LangGraph's chain composition but with the Yield Rule applied at the orchestration boundary.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Use n8n + swarm-lib</span> when you want n8n's scheduling/webhook UX but want Claude / ollama workers participating in the same run.</span></li>
+        <li class="flex gap-3"><span class="text-warm shrink-0">→</span><span><span class="text-text">Use systemd + cron + swarm-lib</span> when you don't want any of the above and just want a substrate that does its job.</span></li>
+      </ul>
+    </section>
+
+  </div>
+
+</Base>
